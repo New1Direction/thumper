@@ -1,0 +1,36 @@
+# Root workspace ignores
+
+# Rust
+**/target/
+**/*.rs.bk
+**/Cargo.lock
+
+# Python
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+**/.pytest_cache/
+**/.hypothesis/
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+*~
+
+# macOS
+.DS_Store
+
+# api-anything specific
+**/.api-anything/
+**/api-anything-registry.json
+**/*.log
+
+# Generated artifacts
+**/generated/
+**/out/
+**/dist/
+
+# Environment
+.env
+.env.local
