@@ -1,0 +1,67 @@
+[package]
+name = "api-anything"
+version = "0.2.0"
+edition = "2021"
+authors = ["API Anything Contributors"]
+description = "Get an API (and harness) from anything — native Rust TUI + headless + ACP binary"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/redmicro/api-anything"
+readme = "README.md"
+keywords = ["api", "harness", "tui", "agent", "acp", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+
+[features]
+default = ["cli", "tui"]
+cli = []
+tui = ["ratatui", "crossterm", "futures", "nucleo-matcher"]
+acp = ["agent-client-protocol", "agent-client-protocol-tokio", "tokio-util"]
+serve = ["acp", "axum", "tower-http", "rust-embed"]
+python-bridge = []
+
+[dependencies]
+# Core (always for CLI/headless)
+clap = { version = "4.6", features = ["derive", "env", "wrap_help"] }
+clap_complete = "4.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+toml = "0.8"
+anyhow = "1.0"
+thiserror = "2.0"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+dirs = "6.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+which = "7.0"
+shellexpand = "3.1"
+regex = "1.0"
+
+# Async (needed even for basic streaming/bridge)
+tokio = { version = "1.44", features = ["full"] }
+
+# TUI (feature = "tui")
+ratatui = { version = "0.30", features = ["crossterm"], optional = true }
+crossterm = { version = "0.28", features = ["event-stream"], optional = true }
+futures = { version = "0.3", optional = true }
+nucleo-matcher = { version = "0.3", optional = true }
+
+# ACP (feature = "acp")
+agent-client-protocol = { version = "0.11", features = ["unstable_session_usage"], optional = true }
+agent-client-protocol-tokio = { version = "0.11", optional = true }
+tokio-util = { version = "0.7", features = ["compat"], optional = true }
+
+# Serve (feature = "serve")
+axum = { version = "0.8", features = ["ws", "json"], optional = true }
+tower-http = { version = "0.6", features = ["trace", "fs"], optional = true }
+rust-embed = { version = "8.5", features = ["include-exclude"], optional = true }
+
+[dev-dependencies]
+serial_test = "3.2"
+tempfile = "3.10"
+assert_cmd = "2.0"
+predicates = "3.0"
+
+[[bin]]
+name = "api-anything"
+path = "src/main.rs"

@@ -1,0 +1,28 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+*~
+
+# macOS
+.DS_Store
+
+# api-anything specific
+~/.api-anything/
+api-anything-registry.json
+*.log
+
+# Python bridge cache (if we ever use it)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Generated artifacts during dev
+/generated/
+out/
+dist/
