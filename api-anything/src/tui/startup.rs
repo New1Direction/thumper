@@ -121,7 +121,9 @@ const TAGLINES: [&str; 30] = [
 /// Returns a tagline with bias toward the more arrogant ones (first 15)
 pub fn get_weighted_tagline(frame: u64) -> &'static str {
     // Use frame to create deterministic but varied selection with bias toward arrogant lines
-    let base = (frame / 4) as usize;
+    // Divided by 24 to cycle taglines every ~2.88 seconds (at 120ms tick rate)
+    // so only 2 or 3 are shown during the 8-second startup screen
+    let base = (frame / 24) as usize;
 
     // 75% bias toward the more arrogant first 15 lines
     if (base % 4) != 3 {
