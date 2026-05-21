@@ -41,7 +41,7 @@ Making the system robust across **Linux, macOS, and Windows** is now the highest
 
 - Make Bun discovery reliable on Windows, macOS, and Linux without requiring users to set `BUN_INSTALL`.
 - Make parent-process detection (the key to auto-enabling the native path during absorb/generation) work on Windows.
-- Keep the Python shim (`cli_anything_bun/process.py`) and Rust selector (`src/bun/execution.rs` + `native.rs`) clean and maintainable.
+- Keep the Python `thump` harness (`thump/process.py`) and Rust native selector clean. The Python layer is now a smart auto-routing proxy.
 - Preserve the existing "prefer native, transparent fallback" contract.
 - Add platform-specific tests so regressions are caught early.
 
@@ -80,7 +80,7 @@ Making the system robust across **Linux, macOS, and Windows** is now the highest
 - Leverage `dirs` crate more (it already handles Windows roaming/local profile nuances).
 - Consider adding `winreg` or simple registry checks only if common installers store Bun there (usually not needed).
 
-### Python Side (`cli_anything_bun/process.py`)
+### Python Side (`thump/process.py` — formerly cli_anything_bun)
 - Keep the shim dependency-free if possible.
 - Windows process walking via `wmic` or PowerShell is acceptable for a thin compatibility layer.
 - Example Windows command:

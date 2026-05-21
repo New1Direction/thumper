@@ -120,7 +120,7 @@ def emit(
     level: EventLevel = EventLevel.INFO,
     session_id: str | None = None,
     op_id: str | None = None,
-    stream: TextIO = sys.stdout,
+    stream: TextIO | None = None,
 ) -> BunEvent:
     """
     Create and immediately emit a BunEvent as a single NDJSON line.
@@ -129,6 +129,8 @@ def emit(
     """
     if data is None:
         data = {}
+    if stream is None:
+        stream = sys.stdout
 
     ev = BunEvent(
         event=event,
@@ -141,8 +143,10 @@ def emit(
     return ev
 
 
-def emit_event(event: BunEvent, stream: TextIO = sys.stdout) -> None:
+def emit_event(event: BunEvent, stream: TextIO | None = None) -> None:
     """Emit an already-constructed BunEvent."""
+    if stream is None:
+        stream = sys.stdout
     print(event.to_json(), file=stream, flush=True)
 
 
@@ -175,7 +179,7 @@ def raw_stdout(
     *,
     session_id: str | None = None,
     op_id: str | None = None,
-    stream: TextIO = sys.stdout,
+    stream: TextIO | None = None,
 ) -> BunEvent:
     """Emit a raw stdout line from a Bun process."""
     return emit(
@@ -193,7 +197,7 @@ def raw_stderr(
     *,
     session_id: str | None = None,
     op_id: str | None = None,
-    stream: TextIO = sys.stdout,
+    stream: TextIO | None = None,
 ) -> BunEvent:
     """Emit a raw stderr line from a Bun process."""
     return emit(
@@ -213,7 +217,7 @@ def raw_stderr(
 def emit_result(
     result: dict[str, Any],
     *,
-    stream: TextIO = sys.stdout,
+    stream: TextIO | None = None,
 ) -> None:
     """
     Emit the final structured result of an operation.
@@ -221,6 +225,8 @@ def emit_result(
     This is distinct from the event stream. Results are emitted once
     per operation and represent the complete outcome.
     """
+    if stream is None:
+        stream = sys.stdout
     print(json.dumps(result, separators=(",", ":")), file=stream, flush=True)
 
 

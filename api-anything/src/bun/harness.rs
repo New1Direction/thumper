@@ -1,8 +1,8 @@
-//! Core subprocess adapter for driving the Python cli-anything-bun harness.
+//! Core subprocess adapter for driving the Python `thump` harness (formerly cli_anything_bun).
 //!
 //! This module knows how to:
 //! - Locate a Python interpreter
-//! - Spawn `python -m cli_anything_bun <subcommand> ...`
+//! - Spawn `python -m thump <subcommand> ...`
 //! - Stream NDJSON from stdout in real time
 //! - Surface the child process exit status
 //!
@@ -131,31 +131,44 @@ async fn find_python() -> Result<PathBuf> {
     ))
 }
 
-/// Locate the cli_anything_bun package root.
+/// Locate the thump (formerly cli_anything_bun) Python package root.
 /// In development we expect it next to the api-anything directory.
-/// Can be overridden with the `CLI_ANYTHING_BUN_ROOT` environment variable.
+/// Can be overridden with `THUMP_BUN_ROOT` (preferred) or legacy `CLI_ANYTHING_BUN_ROOT`.
 fn find_bun_harness_root() -> Result<PathBuf> {
+    // New canonical env var
+    if let Ok(p) = std::env::var("THUMP_BUN_ROOT") {
+        let path = PathBuf::from(p);
+        if path.join("thump").exists() || path.join("__main__.py").exists() {
+            return Ok(path);
+        }
+    }
+    // Legacy env var (BC during rename)
     if let Ok(p) = std::env::var("CLI_ANYTHING_BUN_ROOT") {
         let path = PathBuf::from(p);
-        if path.join("cli_anything_bun").exists() || path.join("__main__.py").exists() {
+        if path.join("thump").exists()
+            || path.join("cli_anything_bun").exists()
+            || path.join("__main__.py").exists()
+        {
             return Ok(path);
         }
     }
 
-    // Heuristic: assume we are in api-anything/ and the harness is at ../cli_anything_bun
+    // Heuristic: assume we are in api-anything/ and the harness is at ../thump (new) or ../cli_anything_bun (legacy)
     let current = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let candidate = current
-        .parent()
-        .map(|p| p.join("cli_anything_bun"))
-        .unwrap_or_else(|| PathBuf::from("../cli_anything_bun"));
+    for candidate_name in ["thump", "cli_anything_bun"] {
+        let candidate = current
+            .parent()
+            .map(|p| p.join(candidate_name))
+            .unwrap_or_else(|| PathBuf::from(format!("../{}", candidate_name)));
 
-    if candidate.exists() {
-        return Ok(candidate);
+        if candidate.exists() {
+            return Ok(candidate);
+        }
     }
 
     Err(anyhow!(
-        "Could not locate cli_anything_bun Python package. \
-         Set CLI_ANYTHING_BUN_ROOT or run from the API workspace root."
+        "Could not locate thump Python package (looked for thump/ and legacy cli_anything_bun/). \
+         Set THUMP_BUN_ROOT or run from the API workspace root."
     ))
 }
 
@@ -166,7 +179,7 @@ pub async fn spawn_bun(inv: BunInvocation) -> Result<BunStream> {
 
     let mut cmd = Command::new(&python);
     cmd.arg("-m")
-        .arg("cli_anything_bun")
+        .arg("thump")
         .args(inv.command.to_args())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped()) // We may surface harness stderr later
@@ -185,6 +198,7 @@ pub async fn spawn_bun(inv: BunInvocation) -> Result<BunStream> {
         format!("{}:{}", harness_root.display(), python_path)
     };
     env.insert("PYTHONPATH".to_string(), new_pp);
+    env.insert("THUMP_PARENT_ACTIVE".to_string(), "1".to_string());
     cmd.envs(env);
 
     // Pass through correlation + options via CLI flags

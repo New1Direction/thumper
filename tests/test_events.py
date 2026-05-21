@@ -16,7 +16,7 @@ from io import StringIO
 
 import pytest
 
-from cli_anything_bun.events import (
+from thump.events import (
     BunEvent,
     EventLevel,
     SCHEMA_VERSION,

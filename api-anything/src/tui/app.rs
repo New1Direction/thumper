@@ -5,6 +5,7 @@ use crate::generator::python_bridge::{generate_python_api, GenerateRequest};
 use crate::tui::job::{Job as PlasmaJob, JobStage};
 use crate::tui::startup;
 use crate::tui::styles;
+use crate::tui::widgets::error_card::render_diagnostic_error_card;
 use crate::tui::widgets::plasma_bar::{render_braille_plasma_bar, render_recursive_fractal_core};
 use anyhow::Result;
 use chrono::Utc;
@@ -22,326 +23,62 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-/// The legendary Bun Tagline Vault (30 lines of pure arrogance and charm)
-fn get_finishing_tagline(score: f32) -> &'static str {
-    let taglines = [
-        // === GOD TIER (95+) - Maximum Arrogance ===
-        "• Bun just violated several laws of physics. Again.",
-        "• I finished before you even finished typing the command.",
-        "• Your other tools are still initializing. Pathetic.",
-        "• Light speed? Cute. I was already on the next frame.",
-        "• The bunny didn’t even break eye contact.",
-        "• Executed with extreme prejudice and zero remorse.",
-        // === ELITE (90–95) - Smartass + Cocky ===
-        "• Clean. Violent. Efficient. You’re welcome.",
-        "• That was adorable. Now watch how it’s actually done.",
-        "• Zero latency. Maximum disrespect for slower runtimes.",
-        "• The engine smiled. It never smiles.",
-        "• Finished so fast it left a vapor trail of shame.",
-        "• Bun said 'hold my beer' and the beer is still cold.",
-        // === VERY GOOD (82–90) - Edgy + Funny ===
-        "• Respectable. For something that isn’t Bun.",
-        "• Not bad. I’ve seen worse. Like, yesterday.",
-        "• Solid. The bar is now slightly higher than the floor.",
-        "• Executed with the grace of a caffeinated god.",
-        "• Clean burn. No wasted cycles. Unlike your life choices.",
-        "• That was fast. Don’t let it go to your head.",
-        // === GOOD (70–82) - Arrogant but Playful ===
-        "• Acceptable. The bunny is mildly impressed.",
-        "• It works. Don’t get used to this level of competence.",
-        "• Finished. No explosions detected. That’s a win.",
-        "• Task complete. Try not to be too emotional about it.",
-        "• We did it. Barely. But we did it.",
-        "• Solid run. The bar was on the floor and we cleared it.",
-        // === CHAOTIC / UNHINGED (Any score) ===
-        "• Bun.exe has stopped giving a fuck.",
-        "• That was so fast it made Node.js cry in the corner.",
-        "• I didn’t even warm up. This was just a light stretch.",
-        "• Physics called. It’s filing a restraining order.",
-        "• Finished before your IDE even realized what happened.",
-        "• The runtime is now judging your entire tech stack.",
-        "• That was cute. Now go touch grass.",
-        "• Bun just did a thing™ and it was illegal in 7 countries.",
-    ];
-
-    let index = match score {
-        s if s >= 95.0 => (s as usize) % 6,
-        s if s >= 90.0 => 6 + ((s as usize) % 6),
-        s if s >= 82.0 => 12 + ((s as usize) % 6),
-        s if s >= 70.0 => 18 + ((s as usize) % 6),
-        _ => 24 + ((score as usize) % 6),
-    };
-
-    taglines[index.min(taglines.len() - 1)]
-}
+use crate::tui::state::{
+    Action, BunLineParse, CompletionContext, CompletionState, GenUpdate, Job, RegistryItem, Toast,
+    get_finishing_tagline, map_native_bun_event_to_stage, parse_bun_native_line,
+};
 use tokio::time::sleep;
-
-/// A simple registry item shown in the TUI (will be replaced by real RegistryStore later).
-#[derive(Debug, Clone)]
-struct RegistryItem {
-    name: String,
-    kind: String,
-    tags: Vec<String>,
-    status: String,
-    last_generated: Option<String>,
-}
-
-impl RegistryItem {
-    fn preview_text(&self) -> String {
-        format!(
-            "Tool: {}\nKind: {}\nStatus: {}\nTags: {}\nLast generated: {}",
-            self.name,
-            self.kind,
-            self.status,
-            self.tags.join(", "),
-            self.last_generated.as_deref().unwrap_or("never")
-        )
-    }
-}
-
-/// Simple job tracking for background generations. Enhanced for activity panel.
-/// Bun jobs get special treatment (icons, raw output collapsing, better labels).
-#[derive(Debug, Clone)]
-struct Job {
-    tool: String,
-    status: String, // "running", "done", "error"
-    message: String,
-    pct: u8,
-    #[allow(dead_code)]
-    started: String,
-    output_path: Option<String>,
-    /// Bun-specific: count of raw stdout/stderr lines received
-    raw_output_count: usize,
-    /// Bun-specific: the most recent raw line (for collapsed display)
-    last_raw_line: Option<String>,
-
-    // === Native Bun parsing state (Chunk 7) ===
-    /// Current logical stage (Resolving → Downloading → Verifying → Complete)
-    bun_stage: Option<String>,
-    /// Count of packages seen via "+ " or "updated " lines
-    bun_package_count: usize,
-    /// Captured timing from [1.20s] / [42ms] style prefixes
-    bun_timing: Option<String>,
-    /// Detected dev server URL (Local: or Listening on)
-    bun_server_url: Option<String>,
-    /// Live speed from native parser (e.g. "2.1MB/s")
-    bun_speed: Option<String>,
-
-    // Chunk 8 Delight Layer
-    completion_flash_until: Option<Instant>,
-    performance_score: Option<f32>,
-}
-
-/// Result of parsing a single line of native Bun output (Chunk 7).
-#[derive(Default)]
-struct BunLineParse {
-    suggested_stage: Option<String>,
-    package_increment: usize,
-    timing: Option<String>,
-    server_url: Option<String>,
-    speed: Option<String>,
-    is_meaningful: bool,
-}
-
-/// Parses a line of output from the native Bun runner and extracts
-/// high-signal information for the Jobs panel.
-fn parse_bun_native_line(line: &str) -> BunLineParse {
-    let trimmed = line.trim();
-
-    let mut result = BunLineParse::default();
-
-    // 1. Timing brackets: [1.20s], [42ms], etc.
-    if let Some(start) = trimmed.find('[') {
-        if let Some(end) = trimmed[start..].find(']') {
-            let candidate = &trimmed[start + 1..start + end];
-            if candidate.ends_with('s') || candidate.ends_with("ms") {
-                result.timing = Some(candidate.to_string());
-                result.is_meaningful = true;
-            }
-        }
-    }
-
-    // 2. Speed from native parser output (e.g. "2.1MB/s" or "12.4 MB/s" in the line)
-    if let Some(pos) = trimmed.find("MB/s").or_else(|| trimmed.find("kB/s")).or_else(|| trimmed.find("GB/s")) {
-        // take a reasonable window before the unit
-        let start = trimmed[..pos].rfind(|c: char| c.is_whitespace()).map(|p| p + 1).unwrap_or(0);
-        let speed_str = trimmed[start..pos + 4].trim();
-        if !speed_str.is_empty() && speed_str.chars().any(|c| c.is_digit(10)) {
-            result.speed = Some(speed_str.to_string());
-            result.is_meaningful = true;
-        }
-    }
-
-    // 2. Package tracking: lines containing " + " or " updated "
-    if trimmed.contains(" + ") || trimmed.contains(" updated ") {
-        result.package_increment = 1;
-        result.is_meaningful = true;
-        if result.suggested_stage.is_none() {
-            result.suggested_stage = Some("Downloading packages".to_string());
-        }
-    }
-
-    // 3. Dev server URLs
-    if trimmed.starts_with("Local:") || trimmed.starts_with("Listening on") {
-        if let Some(url) = trimmed.split_whitespace().find(|s| s.starts_with("http")) {
-            result.server_url = Some(url.to_string());
-            result.suggested_stage = Some("Running dev server".to_string());
-            result.is_meaningful = true;
-        }
-    }
-
-    // 4. Common stage transitions
-    if trimmed.starts_with("Resolving packages") {
-        result.suggested_stage = Some("Resolving packages".to_string());
-        result.is_meaningful = true;
-    } else if trimmed.contains("Saved lockfile") {
-        result.suggested_stage = Some("Lockfile saved".to_string());
-        result.is_meaningful = true;
-    } else if trimmed.starts_with("Checked ") && trimmed.contains("packages") {
-        result.suggested_stage = Some("Verifying installation".to_string());
-        result.is_meaningful = true;
-    } else if trimmed.contains("Installed ") && trimmed.contains("packages") {
-        result.suggested_stage = Some("Installation complete".to_string());
-        result.is_meaningful = true;
-    }
-
-    result
-}
-
-/// Map rich native Bun event names (`bun.native.<verb>.<stream>`) coming from the
-/// native runner (via cli/bun.rs forwarder) to a human-friendly stage label.
-/// These labels power `job.bun_stage`, status bar, and the 📦 / 🚀 icon prefixes
-/// in the Jobs panel.
-fn map_native_bun_event_to_stage(event: &str) -> Option<String> {
-    if event.contains(".install.") {
-        Some("Installing packages".to_string())
-    } else if event.contains(".add.") {
-        Some("Adding packages".to_string())
-    } else if event.contains(".remove.") {
-        Some("Removing packages".to_string())
-    } else if event.contains(".run.") {
-        Some("Running script".to_string())
-    } else {
-        None
-    }
-}
-
-/// Transient success/error toast for beautiful feedback.
-#[derive(Debug, Clone)]
-struct Toast {
-    text: String,
-    is_error: bool,
-    expires_at: Instant,
-}
-
-/// Context for Tab completion in the Bun command palette
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum CompletionContext {
-    TopLevelVerb,
-    ScriptName,
-}
-
-/// State for cycling through completions
-#[derive(Debug, Clone)]
-struct CompletionState {
-    matches: Vec<String>,
-    index: usize,
-    original_word: String, // the word we started completing
-    context: CompletionContext,
-}
 
 /// The main application state.
 pub struct App {
-    items: Vec<RegistryItem>,
+    pub(crate) items: Vec<RegistryItem>,
     /// Master selected index into items (always valid when items non-empty). Navigation and
     /// filtering operate on this; render computes visible slice and highlight position.
-    selected: Option<usize>,
-    should_quit: bool,
-    status_message: String,
-    last_action: String,
-    jobs: Vec<Job>,
+    pub(crate) selected: Option<usize>,
+    pub(crate) should_quit: bool,
+    pub(crate) status_message: String,
+    pub(crate) last_action: String,
+    pub(crate) jobs: Vec<Job>,
     /// Per-tool output path for 'd' key and registry marking.
-    tool_paths: HashMap<String, String>,
+    pub(crate) tool_paths: HashMap<String, String>,
     /// Live filter for / search (fuzzy via nucleo).
-    filter: String,
-    in_search_mode: bool,
+    pub(crate) filter: String,
+    pub(crate) in_search_mode: bool,
     /// Bun command palette mode (e.g. ":add hono --dev")
-    in_bun_command_mode: bool,
-    bun_command_buffer: String,
+    pub(crate) in_bun_command_mode: bool,
+    pub(crate) bun_command_buffer: String,
     /// Real cursor position inside the command buffer (0 = before first char)
-    bun_cursor_index: usize,
+    pub(crate) bun_cursor_index: usize,
     /// Command history for the Bun palette (most recent at the end)
-    bun_command_history: Vec<String>,
+    pub(crate) bun_command_history: Vec<String>,
     /// Current position when navigating history
-    bun_history_index: Option<usize>,
+    pub(crate) bun_history_index: Option<usize>,
 
     /// Tab completion state for the current palette session
-    completion_state: Option<CompletionState>,
+    pub(crate) completion_state: Option<CompletionState>,
     /// Transient error message shown inline in the palette's help line (muted red).
     /// Set on parse/execute failure from palette; cleared automatically on the next keypress.
-    palette_error_message: Option<String>,
+    pub(crate) palette_error_message: Option<String>,
     /// Toggle for richer absorb.py flow on next 'g'.
-    absorb_mode: bool,
+    pub(crate) absorb_mode: bool,
     /// Stack of transient toasts (newest first). Rendered in top-right.
     /// Phase 3: proper multi-toast system with push + expiry.
-    toasts: Vec<Toast>,
-    /// Frame counter for spinners / animations on tick.
-    frame: u64,
+    pub(crate) toasts: Vec<Toast>,
+    /// Frame counter for spinners / animations on tick (kept for classic spinner).
+    pub(crate) frame: u64,
+    /// Wall-clock start time for the entire application.
+    /// Used to drive high-resolution continuous animation_time for the Truecolor plasma engine.
+    pub(crate) start_time: Instant,
     // Channel to receive progress from background generation tasks (real bridge)
-    gen_rx: Option<mpsc::UnboundedReceiver<GenUpdate>>,
-    gen_tx: Option<mpsc::UnboundedSender<GenUpdate>>,
+    pub(crate) gen_rx: Option<mpsc::UnboundedReceiver<GenUpdate>>,
+    pub(crate) gen_tx: Option<mpsc::UnboundedSender<GenUpdate>>,
 
     // Startup screen state
-    startup_start: Option<Instant>,
-    native_bun_available: bool,
+    pub(crate) startup_start: Option<Instant>,
+    pub(crate) native_bun_available: bool,
 }
 
-#[derive(Debug, Clone)]
-pub enum GenUpdate {
-    Progress {
-        tool: String,
-        stage: String,
-        pct: u8,
-        msg: String,
-    },
-    Done {
-        tool: String,
-        path: String,
-    },
-    Error {
-        tool: String,
-        err: String,
-    },
-}
-
-/// Explicit actions returned by input handling (per AGENTS.md TUI pattern).
-/// Execution performed in handle_action so event loop stays clean.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Action {
-    Quit,
-    GenerateSelected,
-    ToggleAbsorb,
-    StartSearch,
-    AppendFilter(char),
-    BackspaceFilter,
-    CommitFilter,
-    CancelFilter,
-    OpenDirForSelected,
-    Refresh,
-    ShowHelp,
-    MoveUp,
-    MoveDown,
-    ActivateItem,
-    /// Trigger a demo Bun job (package install) via the Python harness.
-    /// Shows live streaming in the Jobs panel.
-    TriggerBunJob,
-    /// Open the Bun command palette (e.g. ":add hono --dev" or ":script run dev")
-    OpenBunCommandPalette,
-    /// Execute the current Bun command from the palette
-    ExecuteBunCommand,
-    /// Cancel Bun command palette
-    CancelBunCommand,
-}
+// (Types migrated to state.rs)
 
 impl App {
     pub fn new() -> Self {
@@ -399,6 +136,7 @@ impl App {
             absorb_mode: false,
             toasts: Vec::new(),
             frame: 0,
+            start_time: Instant::now(),
             gen_rx: Some(rx),
             gen_tx: Some(tx),
             startup_start: Some(Instant::now()),
@@ -472,276 +210,12 @@ impl App {
 
     /// Input handling returns Option<Action> (explicit wiring per AGENTS.md).
     /// Search mode captures typing for filter; normal mode dispatches the rest.
-    fn handle_key(&mut self, key: KeyEvent) -> Option<Action> {
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-            return Some(Action::Quit);
-        }
-
-        // Search mode: collect filter chars
-        if self.in_search_mode {
-            match key.code {
-                KeyCode::Char(c) => return Some(Action::AppendFilter(c)),
-                KeyCode::Backspace => return Some(Action::BackspaceFilter),
-                KeyCode::Enter => return Some(Action::CommitFilter),
-                KeyCode::Esc => return Some(Action::CancelFilter),
-                _ => return None,
-            }
-        }
-
-        // Bun Command Palette mode (":add hono --dev", ":script run dev", etc.)
-        if self.in_bun_command_mode {
-            // Any keypress while the palette is open clears the transient inline error (high-visibility feedback UX)
-            self.palette_error_message = None;
-
-            match key.code {
-                KeyCode::Char(c) => {
-                    self.bun_history_index = None;
-                    self.completion_state = None;
-                    // Insert at cursor position (real mid-string editing)
-                    self.bun_command_buffer.insert(self.bun_cursor_index, c);
-                    self.bun_cursor_index += 1;
-                    self.status_message = format!("Bun: {}", self.bun_command_buffer);
-                    return None;
-                }
-                KeyCode::Backspace => {
-                    self.bun_history_index = None;
-                    self.completion_state = None;
-                    if self.bun_cursor_index > 0 {
-                        self.bun_command_buffer.remove(self.bun_cursor_index - 1);
-                        self.bun_cursor_index -= 1;
-                    }
-                    self.status_message = if self.bun_command_buffer.is_empty() {
-                        "Bun command (Esc to cancel)".to_string()
-                    } else {
-                        format!("Bun: {}", self.bun_command_buffer)
-                    };
-                    return None;
-                }
-                KeyCode::Delete => {
-                    self.bun_history_index = None;
-                    self.completion_state = None;
-                    if self.bun_cursor_index < self.bun_command_buffer.len() {
-                        self.bun_command_buffer.remove(self.bun_cursor_index);
-                    }
-                    self.status_message = format!("Bun: {}", self.bun_command_buffer);
-                    return None;
-                }
-                KeyCode::Left => {
-                    self.bun_history_index = None;
-                    if self.bun_cursor_index > 0 {
-                        self.bun_cursor_index -= 1;
-                    }
-                    self.status_message = format!("Bun: {}", self.bun_command_buffer);
-                    return None;
-                }
-                KeyCode::Right => {
-                    self.bun_history_index = None;
-                    if self.bun_cursor_index < self.bun_command_buffer.len() {
-                        self.bun_cursor_index += 1;
-                    }
-                    self.completion_state = None;
-                    self.status_message = format!("Bun: {}", self.bun_command_buffer);
-                    return None;
-                }
-                KeyCode::Home | KeyCode::Char('a')
-                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                {
-                    self.bun_history_index = None;
-                    self.bun_cursor_index = 0;
-                    self.completion_state = None;
-                    self.status_message = format!("Bun: {}", self.bun_command_buffer);
-                    return None;
-                }
-                KeyCode::End | KeyCode::Char('e')
-                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                {
-                    self.bun_history_index = None;
-                    self.bun_cursor_index = self.bun_command_buffer.len();
-                    self.completion_state = None;
-                    self.status_message = format!("Bun: {}", self.bun_command_buffer);
-                    return None;
-                }
-                KeyCode::Up => {
-                    self.completion_state = None;
-                    self.navigate_bun_history(true);
-                    return None;
-                }
-                KeyCode::Down => {
-                    self.completion_state = None;
-                    self.navigate_bun_history(false);
-                    return None;
-                }
-                KeyCode::Tab => {
-                    self.handle_tab_completion(false);
-                    return None;
-                }
-                KeyCode::BackTab => {
-                    // Shift+Tab
-                    self.handle_tab_completion(true);
-                    return None;
-                }
-                KeyCode::Enter => return Some(Action::ExecuteBunCommand),
-                KeyCode::Esc => return Some(Action::CancelBunCommand),
-                _ => return None,
-            }
-        }
-
-        match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => Some(Action::Quit),
-
-            KeyCode::Char('g') => Some(Action::GenerateSelected),
-
-            KeyCode::Char('a') => Some(Action::ToggleAbsorb),
-
-            KeyCode::Char('/') => Some(Action::StartSearch),
-
-            KeyCode::Char('d') => Some(Action::OpenDirForSelected),
-
-            KeyCode::Char('r') => Some(Action::Refresh),
-
-            KeyCode::Down | KeyCode::Char('j') => Some(Action::MoveDown),
-            KeyCode::Up | KeyCode::Char('k') => Some(Action::MoveUp),
-
-            KeyCode::Enter => Some(Action::ActivateItem),
-
-            KeyCode::Char('?') => Some(Action::ShowHelp),
-
-            KeyCode::Char('b') => Some(Action::TriggerBunJob),
-
-            // Colon enters Bun command palette (very powerful for power users)
-            KeyCode::Char(':') => Some(Action::OpenBunCommandPalette),
-
-            _ => None,
-        }
+    pub(crate) fn handle_key(&mut self, key: KeyEvent) -> Option<Action> {
+        super::handlers::handle_key(self, key)
     }
 
-    /// Execute the action (all side effects and real work dispatch here).
-    fn handle_action(&mut self, action: Action) {
-        match action {
-            Action::Quit => {
-                self.should_quit = true;
-            }
-            Action::GenerateSelected => {
-                self.trigger_generation();
-            }
-            Action::ToggleAbsorb => {
-                self.absorb_mode = !self.absorb_mode;
-                self.status_message = format!(
-                    "Absorb mode: {} (richer models+tests via absorb.py)",
-                    if self.absorb_mode { "ON" } else { "OFF" }
-                );
-            }
-            Action::StartSearch => {
-                self.in_search_mode = true;
-                self.filter.clear();
-                self.status_message =
-                    "Search: type to filter registry (fuzzy). Enter/Esc to finish.".to_string();
-            }
-            Action::AppendFilter(c) => {
-                self.filter.push(c);
-                self.status_message = format!("Filter: /{}", self.filter);
-                self.adjust_selection_after_filter();
-            }
-            Action::BackspaceFilter => {
-                self.filter.pop();
-                self.status_message = if self.filter.is_empty() {
-                    "Filter: (cleared)".to_string()
-                } else {
-                    format!("Filter: /{}", self.filter)
-                };
-                self.adjust_selection_after_filter();
-            }
-            Action::CommitFilter | Action::CancelFilter => {
-                self.in_search_mode = false;
-                if matches!(action, Action::CancelFilter) {
-                    self.filter.clear();
-                }
-                self.status_message = if self.filter.is_empty() {
-                    "Filter cleared".to_string()
-                } else {
-                    format!(
-                        "Filter active: {} items shown",
-                        self.visible_indices().len()
-                    )
-                };
-            }
-            Action::OpenDirForSelected => {
-                self.open_selected_dir();
-            }
-            Action::Refresh => {
-                self.status_message = "Registry refreshed (in-memory + dynamic gens)".to_string();
-            }
-            Action::ShowHelp => {
-                self.status_message = "Keys: ↑↓/jk nav • g generate • a absorb • b bun (context) • : palette (add/run/install) • / filter • d open-dir • r refresh • ? help • q quit".to_string();
-            }
-            Action::MoveUp => self.move_previous(),
-            Action::MoveDown => self.move_next(),
-            Action::ActivateItem => {
-                if let Some(sel) = self.selected {
-                    if let Some(item) = self.items.get(sel) {
-                        self.status_message = format!(
-                            "Selected: {} (kind={}). Press g to generate.",
-                            item.name, item.kind
-                        );
-                    }
-                }
-            }
-            Action::TriggerBunJob => {
-                self.trigger_bun_job();
-            }
-            Action::OpenBunCommandPalette => {
-                self.in_bun_command_mode = true;
-                self.bun_history_index = None;
-
-                // Smart pre-fill based on current selection
-                if let Some(sel) = self.selected {
-                    if sel < self.items.len() {
-                        let item = &self.items[sel];
-                        let name = &item.name;
-                        let kind = &item.kind;
-                        let tags = &item.tags;
-
-                        if kind.contains("web")
-                            || kind.contains("framework")
-                            || kind.contains("server")
-                            || tags
-                                .iter()
-                                .any(|t| t.contains("web") || t.contains("framework"))
-                        {
-                            self.bun_command_buffer = format!("add {}", name);
-                        } else if kind.contains("cli")
-                            || tags.iter().any(|t| t == "cli" || t == "tool")
-                        {
-                            self.bun_command_buffer = format!("add {} --dev", name);
-                        } else {
-                            self.bun_command_buffer = format!("add {}", name);
-                        }
-                    } else {
-                        self.bun_command_buffer.clear();
-                    }
-                } else {
-                    self.bun_command_buffer.clear();
-                }
-
-                self.status_message = if self.bun_command_buffer.is_empty() {
-                    "Bun command: (e.g. add hono --dev, script run dev, install)".to_string()
-                } else {
-                    format!("Bun: {}", self.bun_command_buffer)
-                };
-            }
-            Action::ExecuteBunCommand => {
-                self.execute_bun_command_from_palette();
-            }
-            Action::CancelBunCommand => {
-                self.in_bun_command_mode = false;
-                self.bun_command_buffer.clear();
-                self.bun_cursor_index = 0;
-                self.bun_history_index = None;
-                self.completion_state = None;
-                self.palette_error_message = None;
-                self.status_message = "Bun command cancelled".to_string();
-            }
-        }
+    pub(crate) fn handle_action(&mut self, action: Action) {
+        super::handlers::handle_action(self, action);
     }
 
     fn handle_gen_update(&mut self, update: GenUpdate) {
@@ -876,6 +350,7 @@ impl App {
                         bun_speed: None,
                         completion_flash_until: None,
                         performance_score: None,
+                        error_diagnostics: None,
                     };
 
                     // Seed from rich native event name first (gives broad category for icon)
@@ -981,12 +456,17 @@ impl App {
                 }
                 self.tool_paths.insert(tool, path);
             }
-            GenUpdate::Error { tool, err } => {
+            GenUpdate::Error {
+                tool,
+                err,
+                diagnostics,
+            } => {
                 self.status_message = format!("Error generating {}: {}", tool, err);
                 self.push_toast(format!("✗ {}: {}", tool, err), true);
                 if let Some(job) = self.jobs.iter_mut().rev().find(|j| j.tool == tool) {
                     job.status = "error".into();
                     job.message = err.clone();
+                    job.error_diagnostics = Some(diagnostics.clone());
                 }
 
                 // === Chunk 7: Rich error summary for Bun jobs
@@ -997,6 +477,7 @@ impl App {
                     if let Some(job) = self.jobs.iter_mut().rev().find(|j| j.tool == tool) {
                         job.status = "error".into();
                         job.message = format!("✗ {}", err);
+                        job.error_diagnostics = Some(diagnostics);
                     }
                 }
             }
@@ -1005,7 +486,7 @@ impl App {
 
     // --- Helpers for dynamic filtered navigation + jobs + toasts (explicit, no dead code) ---
 
-    fn visible_indices(&self) -> Vec<usize> {
+    pub(crate) fn visible_indices(&self) -> Vec<usize> {
         if self.filter.trim().is_empty() {
             return (0..self.items.len()).collect();
         }
@@ -1020,7 +501,7 @@ impl App {
             .collect()
     }
 
-    fn adjust_selection_after_filter(&mut self) {
+    pub(crate) fn adjust_selection_after_filter(&mut self) {
         let vis = self.visible_indices();
         if vis.is_empty() {
             self.selected = None;
@@ -1035,7 +516,7 @@ impl App {
         }
     }
 
-    fn move_next(&mut self) {
+    pub(crate) fn move_next(&mut self) {
         let vis = self.visible_indices();
         if vis.is_empty() {
             return;
@@ -1050,7 +531,7 @@ impl App {
         self.selected = Some(vis[0]);
     }
 
-    fn move_previous(&mut self) {
+    pub(crate) fn move_previous(&mut self) {
         let vis = self.visible_indices();
         if vis.is_empty() {
             return;
@@ -1065,7 +546,7 @@ impl App {
         self.selected = Some(*vis.last().unwrap());
     }
 
-    fn spinner(&self) -> &'static str {
+    pub(crate) fn spinner(&self) -> &'static str {
         const SPIN: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         SPIN[(self.frame as usize) % SPIN.len()]
     }
@@ -1097,7 +578,7 @@ impl App {
         self.update_toasts();
     }
 
-    fn trigger_generation(&mut self) {
+    pub(crate) fn trigger_generation(&mut self) {
         let sel = match self.selected {
             Some(s) => s,
             None => return,
@@ -1125,6 +606,7 @@ impl App {
             bun_speed: None,
             completion_flash_until: None,
             performance_score: None,
+            error_diagnostics: None,
         });
 
         if let Some(tx) = &self.gen_tx {
@@ -1147,7 +629,7 @@ impl App {
 
                 let req = GenerateRequest {
                     tool_name: tool.clone(),
-                    description: "Generated from api-anything TUI".into(),
+                    description: "Generated from Thumper TUI".into(),
                     output_dir: std::path::PathBuf::from(format!("{}-api", tool)),
                     use_absorb,
                     progress_tx: Some(p_tx),
@@ -1185,6 +667,7 @@ impl App {
                         let _ = tx.send(GenUpdate::Error {
                             tool,
                             err: e.to_string(),
+                            diagnostics: vec![],
                         });
                     }
                 }
@@ -1192,11 +675,11 @@ impl App {
         }
     }
 
-    /// Trigger a real Bun job through the cli-anything-bun harness.
+    /// Trigger a real Bun job through the thump (Python) harness, which may auto-promote to native Rust.
     /// Context-aware: if a registry item is selected, it performs a useful action
     /// on that item (e.g. `bun package add <name>`). Falls back to a safe demo otherwise.
     /// This reuses the exact same `cli::bun::run` path as the generic case.
-    fn trigger_bun_job(&mut self) {
+    pub(crate) fn trigger_bun_job(&mut self) {
         // --- Context-aware Bun action based on selected registry item ---
         let (bun_cmd, tool_label, initial_msg) = if let Some(sel) = self.selected {
             if sel < self.items.len() {
@@ -1302,6 +785,7 @@ impl App {
             bun_speed: None,
             completion_flash_until: None,
             performance_score: None,
+            error_diagnostics: None,
         });
 
         if let Some(tx) = &self.gen_tx {
@@ -1312,7 +796,7 @@ impl App {
                     tool: tool_label.clone(),
                     stage: "start".into(),
                     pct: 10,
-                    msg: "Invoking cli-anything-bun (Python semantic harness)...".into(),
+                    msg: "Invoking thump Bun harness (Python proxy layer)...".into(),
                 });
 
                 // Use the general run() so any BunCommand variant works.
@@ -1324,8 +808,59 @@ impl App {
         }
     }
 
+    /// Predictive self-healing: when a failed job with diagnostics is present,
+    /// offer one-click recovery (e.g. auto `bun install` after ENOENT / missing lockfile).
+    pub(crate) fn execute_predictive_recovery(&mut self) {
+        // Find the most recent job that has real error diagnostics
+        if let Some(job) = self
+            .jobs
+            .iter_mut()
+            .rev()
+            .find(|j| j.error_diagnostics.is_some())
+        {
+            let diagnostics = job.error_diagnostics.take().unwrap_or_default();
+            let (_hint, action) = crate::tui::widgets::error_card::analyze_failure(&diagnostics);
+
+            if action == crate::tui::widgets::error_card::PredictiveAction::RunBunInstall {
+                // Spawn a fresh `bun install` job (re-uses the exact same path as palette / 'b' key)
+                if let Some(tx) = &self.gen_tx {
+                    let tx = tx.clone();
+                    let tool_label = "bun:package:install (recovery)".to_string();
+
+                    // Use the same Bun command shape the palette uses for "install"
+                    let bun_cmd = crate::cli::definition::BunCommands::Package {
+                        command: crate::cli::definition::BunPackageCommands::Install {
+                            packages: vec![],
+                            frozen_lockfile: false,
+                        },
+                    };
+
+                    tokio::spawn(async move {
+                        let _ = crate::cli::bun::run(bun_cmd, None, None, Some(tx)).await;
+                    });
+
+                    self.status_message =
+                        "Recovery: running `bun install` (new job will appear above)".to_string();
+                    return;
+                }
+            } else if action == crate::tui::widgets::error_card::PredictiveAction::RunBunInit {
+                self.status_message =
+                    "Recovery action 'bun init' is not yet wired (coming soon)".to_string();
+                // We could spawn a special init command here in the future
+                return;
+            }
+
+            // If no actionable recovery was possible, restore the diagnostics so the card stays visible
+            job.error_diagnostics = Some(diagnostics);
+            self.status_message =
+                "No automatic recovery action available for this error.".to_string();
+        } else {
+            self.status_message = "No failed job with diagnostics to recover from.".to_string();
+        }
+    }
+
     /// Parse and execute a command typed in the Bun command palette.
-    fn execute_bun_command_from_palette(&mut self) {
+    pub(crate) fn execute_bun_command_from_palette(&mut self) {
         let input = self.bun_command_buffer.trim().to_string();
 
         if input.is_empty() {
@@ -1368,6 +903,7 @@ impl App {
                     bun_speed: None,
                     completion_flash_until: None,
                     performance_score: None,
+                    error_diagnostics: None,
                 });
 
                 if let Some(tx) = &self.gen_tx {
@@ -1473,7 +1009,7 @@ impl App {
         self.palette_error_message = None;
     }
 
-    fn navigate_bun_history(&mut self, up: bool) {
+    pub(crate) fn navigate_bun_history(&mut self, up: bool) {
         if self.bun_command_history.is_empty() {
             return;
         }
@@ -1536,7 +1072,7 @@ impl App {
     }
 
     /// Dotfile path for persisting the last ~20 Bun palette commands.
-    /// Prefers ~/.config/api-anything/bun_history; falls back gracefully to ~/.bun_history or cwd.
+    /// Prefers ~/.config/api-anything/bun_history (legacy path during rename) or Thumper-specific location; falls back gracefully.
     fn bun_history_path() -> std::path::PathBuf {
         if let Some(mut p) = dirs::config_dir() {
             p.push("api-anything");
@@ -1654,7 +1190,7 @@ impl App {
         scripts
     }
 
-    fn handle_tab_completion(&mut self, reverse: bool) {
+    pub(crate) fn handle_tab_completion(&mut self, reverse: bool) {
         let context = self.get_completion_context();
         let all_matches = self.get_completions(context.clone());
 
@@ -1725,7 +1261,7 @@ impl App {
         self.status_message = format!("Bun: {}{}", self.bun_command_buffer, match_info);
     }
 
-    fn open_selected_dir(&mut self) {
+    pub(crate) fn open_selected_dir(&mut self) {
         let sel = match self.selected {
             Some(s) => s,
             None => {
@@ -2015,562 +1551,7 @@ impl App {
         };
 
         // Rich header line with BunBunny branding (mauve) + metric ribbon on the right
-        let header_line = Line::from(vec![
-            Span::styled("🐰 ", styles::bunbunny_mauve()),
-            Span::styled("API ANYTHING", styles::bunbunny_mauve()),
-            Span::raw("  —  Get an API from anything"),
-            Span::styled(absorb_badge, styles::header_style()),
-            Span::styled(filter_badge, styles::header_style()),
-            Span::raw("  "),
-            Span::styled(&metric_ribbon, Style::default().fg(styles::MOCHA_MAUVE)),
-        ]);
-
-        let header = Paragraph::new(header_line)
-            .alignment(Alignment::Center)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .border_style(styles::border_style())
-                    .title(" v0.2.0  •  native Bun delight "),
-            );
-        f.render_widget(header, chunks[0]);
-
-        // Body split horizontal
-        let body_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(42), Constraint::Percentage(58)])
-            .split(chunks[1]);
-
-        // Left: Registry list (dynamic + filtered)
-        let vis = self.visible_indices();
-        let list_items: Vec<ListItem> = vis
-            .iter()
-            .map(|&idx| {
-                let item = &self.items[idx];
-                let marker = if item.status == "generated" {
-                    "★ "
-                } else {
-                    ""
-                };
-                let line = format!("{}{}  [{}]", marker, item.name, item.kind);
-                let base_style = if item.status == "generated" {
-                    styles::success_style()
-                } else if item.status == "ok" {
-                    Style::default().fg(Color::Green)
-                } else {
-                    styles::running_style()
-                };
-                ListItem::new(line).style(base_style)
-            })
-            .collect();
-
-        let filter_title = if self.filter.is_empty() {
-            " Registry (↑↓ jk • / filter) ".to_string()
-        } else {
-            format!(" Registry ({} shown • /{}) ", vis.len(), self.filter)
-        };
-
-        let list = List::new(list_items)
-            .block(
-                Block::default()
-                    .title(filter_title)
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .border_style(styles::border_style()),
-            )
-            .highlight_style(styles::list_highlight_style())
-            .highlight_symbol("▶ ");
-
-        // Compute highlight pos from master selected into current visible
-        let mut list_state = ListState::default();
-        if let Some(sel) = self.selected {
-            if let Some(pos) = vis.iter().position(|&v| v == sel) {
-                list_state.select(Some(pos));
-            } else if !vis.is_empty() {
-                list_state.select(Some(0));
-            }
-        }
-        f.render_stateful_widget(list, body_chunks[0], &mut list_state);
-
-        // Right: Preview pane (warm style)
-        let preview_text = if let Some(sel) = self.selected {
-            if sel < self.items.len() {
-                self.items[sel].preview_text()
-            } else {
-                "Select…".to_string()
-            }
-        } else {
-            "Select an item with ↑/↓ or j/k. Press / to fuzzy-filter.".to_string()
-        };
-
-        let preview = Paragraph::new(preview_text)
-            .wrap(Wrap { trim: true })
-            .block(
-                Block::default()
-                    .title(" Preview / Details ")
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .border_style(styles::border_style()),
-            )
-            .style(styles::preview_style());
-        f.render_widget(preview, body_chunks[1]);
-
-        // Jobs / Activity panel (task #1 + #2: live streamed progress, status, paths)
-        let job_vis: Vec<_> = self.jobs.iter().rev().take(6).collect(); // newest first at top
-        let job_items: Vec<ListItem> = job_vis
-            .into_iter()
-            .map(|job| {
-                let sp = if job.status == "running" {
-                    self.spinner()
-                } else {
-                    " "
-                };
-                let pct_str = if job.status == "running" && job.pct > 0 {
-                    format!(" {:>3}%", job.pct)
-                } else {
-                    String::new()
-                };
-                let path_part = job
-                    .output_path
-                    .as_deref()
-                    .map(|p| format!(" → {}", p))
-                    .unwrap_or_default();
-
-                // Bun-specific formatting + icons + raw collapsing
-                let is_bun = job.tool.starts_with("bun:")
-                    || job.tool.contains("package:")
-                    || job.tool.contains("script:");
-
-                // Icon by operation category (stable even after bun_stage refines to "Resolving...")
-                // 📦 for all package ops (install/add/remove), 🚀 for scripts/runs, etc.
-                let icon = if is_bun {
-                    if job.tool.contains("install")
-                        || job.tool.contains("add")
-                        || job.tool.contains("remove")
-                        || job.tool.contains("package:")
-                    {
-                        "📦 "
-                    } else if job.tool.contains("run") || job.tool.contains("script:") {
-                        "🚀 "
-                    } else {
-                        "🐰 "
-                    }
-                } else {
-                    ""
-                };
-
-                let display_tool = if is_bun {
-                    // Chunk 7: Clean title
-                    job.tool.replace("palette: ", "bun ").to_string()
-                } else {
-                    job.tool.clone()
-                };
-
-                // Prefer the live bun_stage (from rich native events or content parse) when present.
-                // This is what makes native Bun jobs feel polished in the Jobs panel.
-                let display_label = if is_bun {
-                    job.bun_stage
-                        .clone()
-                        .unwrap_or_else(|| display_tool.clone())
-                } else {
-                    display_tool.clone()
-                };
-
-                let display_msg = if is_bun && job.raw_output_count > 1 {
-                    // Show collapsed raw output for Bun jobs
-                    if let Some(last) = &job.last_raw_line {
-                        format!(
-                            "{} [+{} raw] {}",
-                            job.message,
-                            job.raw_output_count,
-                            last.chars().take(50).collect::<String>()
-                        )
-                    } else {
-                        format!("{} [+{} raw lines]", job.message, job.raw_output_count)
-                    }
-                } else {
-                    job.message.clone()
-                };
-
-                // === Refinement B: High-density structured line for Bun (Chunk 7) ===
-                // Build a proper styled Line to preserve colors from the plasma widgets
-                let content: Line<'static> = if is_bun {
-                    let is_flash = if let Some(until) = &job.completion_flash_until {
-                        Instant::now() < *until && job.status == "done"
-                    } else {
-                        false
-                    };
-
-                    if job.status == "done" && is_flash {
-                        // === FLASH STATE with sparkle + animated rank (Chunk 8 polish) ===
-                        let score = job.performance_score.unwrap_or(75.0);
-                        let tagline = get_finishing_tagline(score);
-
-                        // Chunk 8: Stronger sparkle + confetti on high-score native package runs
-                        let sparkle = if score >= 95.0 {
-                            let sparkles = ["✦", "✧", "✨", "·", "•", "◦", " "];
-                            let idx = ((self.frame / 3) as usize) % sparkles.len(); // faster cycle on god tier
-                            format!(" {}", sparkles[idx])
-                        } else if score >= 85.0 && job.bun_package_count >= 3 {
-                            // Light confetti / success particles for solid native package wins
-                            let confetti = ["✦", "·", "•", " "];
-                            let idx = ((self.frame / 5) as usize) % confetti.len();
-                            format!(" {}", confetti[idx])
-                        } else {
-                            String::new()
-                        };
-
-                        // Animated rank badge (count-up reveal during flash)
-                        let rank = if score >= 95.0 {
-                            let anim = ((self.frame / 3) as usize) % 5;
-                            match anim {
-                                0 => " [G",
-                                1 => " [GO",
-                                2 => " [GOD",
-                                3 => " [GOD]",
-                                _ => " [GOD]",
-                            }
-                        } else if score >= 90.0 {
-                            " [ELITE]"
-                        } else if score >= 80.0 {
-                            " [PRO]"
-                        } else {
-                            ""
-                        };
-
-                        // Chunk 8 delight: tiny success bunny on excellent native package runs
-                        let success_bunny = if job.bun_package_count >= 5 && score >= 90.0 {
-                            " 🐰"
-                        } else {
-                            ""
-                        };
-
-                        let summary = if let Some(url) = &job.bun_server_url {
-                            format!(
-                                "✔ Active • {}  {}{}{}{}",
-                                url, tagline, rank, sparkle, success_bunny
-                            )
-                        } else if job.bun_package_count > 0 {
-                            if let Some(t) = &job.bun_timing {
-                                format!(
-                                    "✔ {} packages • {}  {}{}{}{}",
-                                    job.bun_package_count, t, tagline, rank, sparkle, success_bunny
-                                )
-                            } else {
-                                format!(
-                                    "✔ {} packages  {}{}{}{}",
-                                    job.bun_package_count, tagline, rank, sparkle, success_bunny
-                                )
-                            }
-                        } else {
-                            format!(
-                                "✔ Complete  {}{}{}{}",
-                                tagline, rank, sparkle, success_bunny
-                            )
-                        };
-
-                        let flash_style = if score >= 95.0 {
-                            Style::default()
-                                .fg(Color::Green)
-                                .add_modifier(Modifier::BOLD)
-                        } else {
-                            Style::default()
-                                .fg(Color::Green)
-                                .add_modifier(Modifier::BOLD)
-                        };
-
-                        Line::from(Span::styled(summary, flash_style))
-                    } else {
-                        // Normal active or post-flash calm
-                        let proxy = PlasmaJob {
-                            id: 0,
-                            command: display_tool.clone(),
-                            stage: match job.bun_stage.as_deref() {
-                                Some("Resolving packages") => JobStage::Resolving,
-                                Some("Downloading packages") => JobStage::Downloading,
-                                Some(s) if s.contains("Verifying") => JobStage::Verifying,
-                                Some(s) if s.contains("complete") || s.contains("Active") => {
-                                    JobStage::Complete
-                                }
-                                // Rich native stages from Chunk 6
-                                Some(s)
-                                    if s.contains("Installing")
-                                        || s.contains("Adding")
-                                        || s.contains("Removing") =>
-                                {
-                                    JobStage::PackageOp
-                                }
-                                Some(s) if s.contains("Running script") || s.contains("script") => {
-                                    JobStage::ScriptRunning
-                                }
-                                _ => {
-                                    // Fall back using the tool string for native package vs script
-                                    if job.tool.contains("run") || job.tool.contains("script:") {
-                                        JobStage::ScriptRunning
-                                    } else if job.tool.contains("package:")
-                                        || job.tool.contains("install")
-                                        || job.tool.contains("add")
-                                        || job.tool.contains("remove")
-                                    {
-                                        JobStage::PackageOp
-                                    } else {
-                                        JobStage::Downloading
-                                    }
-                                }
-                            },
-                            start_time: std::time::Instant::now()
-                                - std::time::Duration::from_secs(1),
-                            elapsed: std::time::Duration::from_millis((job.pct as u64) * 10),
-                            progress: (job.pct as f32) / 100.0,
-                            // Velocity: prefer real timing from native Bun output when available
-                            velocity: {
-                                if let Some(t) = &job.bun_timing {
-                                    // Parse "1.23s" or "420ms" into a normalized speed feel
-                                    let secs = if t.ends_with("ms") {
-                                        t.trim_end_matches("ms").parse::<f32>().unwrap_or(400.0)
-                                            / 1000.0
-                                    } else {
-                                        t.trim_end_matches('s').parse::<f32>().unwrap_or(1.5)
-                                    };
-                                    // Faster real time = higher velocity (more "alive" plasma)
-                                    (1.0 / (secs + 0.2)).clamp(0.35, 0.98)
-                                } else if job.bun_package_count > 8 {
-                                    0.92
-                                } else if job.bun_package_count > 0 {
-                                    0.75
-                                } else {
-                                    0.55
-                                }
-                            },
-                            phase_offset: self.frame as u64,
-                            completion_time: None,
-                            performance_score: job.performance_score,
-                        };
-
-                        // Real celebration when flash is active AND we have good native signals
-                        let is_celebrating = is_flash
-                            && (job.performance_score.unwrap_or(0.0) >= 78.0
-                                || job.bun_package_count >= 3);
-
-                        // 1. Generate the fully stylized TUI components (styles preserved)
-                        let mut core_spans = render_recursive_fractal_core(&proxy);
-                        let mut bar_line = render_braille_plasma_bar(&proxy, 12, is_celebrating);
-
-                        // 2. Build the row prefix layout elements
-                        // Use display_label (bun_stage when present) so native jobs show
-                        // "📦 Installing packages" / "🚀 Running script" etc. with the icon.
-                        let mut row_spans: Vec<Span<'static>> = vec![
-                            Span::raw(format!("{} ", sp)),
-                            Span::raw(format!("{} ", icon)),
-                            Span::styled(
-                                format!("{} ", display_label),
-                                Style::default().fg(Color::Gray),
-                            ),
-                        ];
-
-                        // 3. Assemble components sequentially into a single stylized Line container
-                        row_spans.append(&mut core_spans);
-                        row_spans.push(Span::raw(" "));
-                        row_spans.append(&mut bar_line.spans);
-
-                        Line::from(row_spans)
-                    }
-                } else {
-                    Line::from(format!(
-                        "{}{} {} [{}] {}{}{}",
-                        sp, icon, display_tool, job.status, display_msg, pct_str, path_part
-                    ))
-                };
-                let sty = match job.status.as_str() {
-                    "running" => {
-                        if is_bun {
-                            Style::default().fg(Color::Yellow)
-                        } else {
-                            styles::running_style()
-                        }
-                    }
-                    "done" => {
-                        let is_flash = if let Some(until) = &job.completion_flash_until {
-                            Instant::now() < *until && is_bun
-                        } else {
-                            false
-                        };
-                        if is_flash {
-                            Style::default()
-                                .fg(Color::Green)
-                                .add_modifier(Modifier::BOLD)
-                        } else {
-                            styles::success_style()
-                        }
-                    }
-                    "error" => styles::error_style(),
-                    _ => styles::muted_style(),
-                };
-                ListItem::new(content).style(sty)
-            })
-            .collect();
-
-        let has_bun_jobs = self.jobs.iter().any(|j| {
-            j.tool.starts_with("bun:") || j.tool.contains("package:") || j.tool.contains("script:")
-        });
-
-        let jobs_title = if has_bun_jobs {
-            // Phase 4: subtle aggregate footer metrics for native Bun activity
-            let native_jobs: Vec<_> = self
-                .jobs
-                .iter()
-                .filter(|j| {
-                    j.tool.starts_with("bun:")
-                        || j.tool.contains("package:")
-                        || j.tool.contains("script:")
-                })
-                .collect();
-
-            let pkg_count: usize = native_jobs.iter().map(|j| j.bun_package_count).sum();
-            let avg_time: Option<String> = native_jobs
-                .iter()
-                .filter_map(|j| j.bun_timing.as_deref())
-                .filter_map(|t| {
-                    if t.ends_with('s') {
-                        t.trim_end_matches('s').parse::<f32>().ok()
-                    } else if t.ends_with("ms") {
-                        t.trim_end_matches("ms")
-                            .parse::<f32>()
-                            .ok()
-                            .map(|ms| ms / 1000.0)
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>()
-                .into_iter()
-                .reduce(|a, b| a + b)
-                .map(|sum| {
-                    let avg = sum / native_jobs.len().max(1) as f32;
-                    format!("{:.1}s", avg)
-                });
-
-            let best_perf = native_jobs
-                .iter()
-                .filter_map(|j| j.performance_score)
-                .fold(0.0f32, |a, b| a.max(b));
-
-            let stats = match (pkg_count > 0, avg_time.as_deref(), best_perf > 70.0) {
-                (true, Some(t), true) => {
-                    format!(" · {} pkgs · {} · {:.0}% peak", pkg_count, t, best_perf)
-                }
-                (true, Some(t), _) => format!(" · {} pkgs · {}", pkg_count, t),
-                (true, None, _) => format!(" · {} pkgs", pkg_count),
-                _ => String::new(),
-            };
-
-            format!(" Jobs / Activity — 📦🚀 Native Bun (live){} ", stats)
-        } else {
-            " Jobs / Activity — live progress from python_bridge (g immediately enqueues) "
-                .to_string()
-        };
-
-        let jobs_list = List::new(job_items).block(
-            Block::default()
-                .title(jobs_title)
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(styles::border_style()),
-        );
-        f.render_widget(jobs_list, chunks[2]);
-
-        // Chunk 8 surface polish: live native Bun activity in the status bar
-        let live_bun_indicator = self
-            .jobs
-            .iter()
-            .rev()
-            .find(|j| {
-                (j.tool.starts_with("bun:")
-                    || j.tool.contains("package:")
-                    || j.tool.contains("script:"))
-                    && j.status == "running"
-            })
-            .and_then(|j| {
-                if let Some(st) = &j.bun_stage {
-                    let icon = if j.tool.contains("run") || j.tool.contains("script") {
-                        "🚀"
-                    } else {
-                        "📦"
-                    };
-                    Some(format!(" {} {}  ", icon, st))
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_default();
-
-        // Status bar (with time)
-        let status_text = format!(
-            "{}{}   |   {}   |   {}",
-            live_bun_indicator,
-            self.status_message,
-            if self.last_action.is_empty() {
-                "—"
-            } else {
-                &self.last_action
-            },
-            Utc::now().format("%H:%M:%S")
-        );
-        let status = Paragraph::new(status_text)
-            .style(styles::status_style())
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .border_style(styles::border_style())
-                    .title(
-                        " Status — q/esc quit • g gen(real) • a absorb • / filter • d dir • r • ? ",
-                    ),
-            );
-        // Bottom area: either normal status bar or the sharp 2-line Bun command palette
-        if self.in_bun_command_mode {
-            self.render_bun_command_palette(f, chunks[3]);
-        } else {
-            f.render_widget(status, chunks[3]);
-        }
-
-        // Phase 3 Atmospheric Polish: stacked toasts in top-right corner
-        // Newest on top, clean Mocha surface background, 2.8s fade
-        let mut y_offset = 1u16;
-        for t in &self.toasts {
-            let toast_w = 48.min(size.width);
-            let toast_h = 2; // compact single-line toasts
-            let toast_area = Rect {
-                x: size.width.saturating_sub(toast_w + 1),
-                y: y_offset,
-                width: toast_w,
-                height: toast_h,
-            };
-
-            let base_style = if t.is_error {
-                styles::error_style()
-            } else {
-                styles::success_style()
-            };
-
-            let toast = Paragraph::new(t.text.as_str())
-                .style(base_style.add_modifier(Modifier::BOLD))
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_type(BorderType::Rounded)
-                        .border_style(Style::default().fg(styles::MOCHA_SURFACE0))
-                        .style(Style::default().bg(styles::MOCHA_SURFACE0))
-                        .title(if t.is_error { " ✗ " } else { " ✓ " }),
-                );
-            f.render_widget(toast, toast_area);
-
-            y_offset += toast_h + 1; // small gap between stacked toasts
-            if y_offset + 2 > size.height {
-                break;
-            }
-        }
+        super::widgets::views::render_app(self, f);
     }
 }
 
@@ -2602,6 +1583,8 @@ mod palette_smoke {
         let xdg_config = temp_root.path().join("config");
         std::fs::create_dir_all(&xdg_config).unwrap();
         std::env::set_var("XDG_CONFIG_HOME", &xdg_config);
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", temp_root.path());
 
         // --- Give the script-completion path a fake package.json so (n/m) can be meaningful ---
         let pkg_tmp = tempfile::tempdir().expect("pkg dir");
@@ -2727,6 +1710,11 @@ mod palette_smoke {
         // Cleanup environment
         let _ = std::env::set_current_dir(old_cwd);
         std::env::remove_var("XDG_CONFIG_HOME");
+        if let Some(h) = old_home {
+            std::env::set_var("HOME", h);
+        } else {
+            std::env::remove_var("HOME");
+        }
 
         println!("\n✅  Palette smoke test PASSED — all six steps exercised successfully:");
         println!("   • Open with ':'");

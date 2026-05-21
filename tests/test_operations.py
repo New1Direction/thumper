@@ -15,7 +15,7 @@ from io import StringIO
 
 import pytest
 
-from cli_anything_bun.operations import Operation, operation
+from thump.operations import Operation, operation
 
 
 def _capture(fn):

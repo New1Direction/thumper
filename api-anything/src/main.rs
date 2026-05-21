@@ -1,10 +1,11 @@
-//! api-anything — Get an API from anything.
-//! Native Rust binary providing TUI, headless JSON/stream, ACP, and serve modes.
+//! Thumper (thump) — The delightful native Bun TUI & CLI with rich telemetry.
+//! Native Rust execution, living plasma visualization, four aliases, and full ACP / headless support.
 
 #[cfg(feature = "acp")]
 mod acp;
-mod bun; // cli-anything-bun Python harness adapter (NDJSON streaming + subprocess)
+mod bun; // thump (formerly cli_anything_bun) Python harness adapter (NDJSON streaming + subprocess)
 mod cli;
+mod demo;
 mod generator; // will contain python_bridge + engine later
 mod registry;
 #[cfg(feature = "tui")]
@@ -20,6 +21,15 @@ use tracing_subscriber::EnvFilter;
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = cli::definition::Cli::parse();
+
+    if cli.debug_ancestry {
+        println!("{}", crate::bun::get_ancestry_diagnostics());
+        return Ok(());
+    }
+
+    if cli.demo {
+        return crate::demo::run_demo().await;
+    }
 
     // Logging setup — respect -v / -q / RUST_LOG
     let level = if cli.quiet {
@@ -129,6 +139,19 @@ async fn main() -> Result<()> {
                 // This goes through the smart native-first selector.
                 cli::bun::run(command.clone(), None, None, None).await?;
             }
+            cli::definition::InternalCommands::DebugAncestry { json } => {
+                if *json {
+                    if let Ok(report) =
+                        serde_json::to_string_pretty(&crate::bun::get_ancestry_report())
+                    {
+                        println!("{}", report);
+                    } else {
+                        println!("{{\"error\": \"failed to serialize ancestry report\"}}");
+                    }
+                } else {
+                    println!("{}", crate::bun::get_ancestry_diagnostics());
+                }
+            }
         },
 
         Some(Commands::Agent { command }) => match command {
@@ -146,11 +169,6 @@ async fn main() -> Result<()> {
             }
             _ => eprintln!("other agent modes (serve) not fully wired yet"),
         },
-
-        #[cfg(feature = "serve")]
-        Some(Commands::Serve { .. }) => {
-            println!("serve mode requires the `serve` feature (cargo build --features serve)");
-        }
 
         Some(Commands::Doctor { json }) => {
             let report = serde_json::json!({

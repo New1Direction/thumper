@@ -1,9 +1,9 @@
 """
-CLI entry point for cli-anything-bun.
+CLI entry point for thump (Thumper's Python Bun semantic harness).
 
 This module turns the Python semantic harness into a real, runnable CLI
 that can be invoked directly or as a subprocess from the Rust frontend
-(api-anything).
+(thump / thumper / bunny / thump-cli).
 
 It provides:
 
@@ -14,9 +14,9 @@ It provides:
 - Full NDJSON event stream passthrough (the library already emits everything)
 
 Usage examples:
-    python -m cli_anything_bun script run dev
-    python -m cli_anything_bun package add hono zod --dev
-    python -m cli_anything_bun package remove zod
+    python -m thump script run dev
+    python -m thump package add hono zod --dev
+    python -m thump package remove zod
 """
 
 from __future__ import annotations

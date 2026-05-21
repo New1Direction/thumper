@@ -11,7 +11,7 @@
 
 Current state (palette + `b` key + Jobs panel):
 - All Bun execution goes through `cli::bun::run(...)` → `bun::harness::spawn_bun(...)`
-- `spawn_bun` always shells out to `python -m cli_anything_bun`
+- `spawn_bun` (legacy path) shells out to `python -m thump` (the smart proxy that prefers native)
 - This works beautifully but adds Python + harness startup cost and a hard dependency.
 
 **This iteration (Phase 1)** targets the **common fast path** used by the command palette and context-aware `b` key:
@@ -43,7 +43,7 @@ BunCommands (from palette / CLI / ACP)
           │                                         ▼
           │                                   BunEvent / BunOutcome
           │
-          └─► Python path (existing) ──► spawn_bun(...) ──► python -m cli_anything_bun
+          └─► Python path (thump proxy) ──► spawn_bun(...) ──► python -m thump (auto-promotes to native)
 ```
 
 Selection strategy (runtime, no compile-time flag required initially):

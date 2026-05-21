@@ -1,4 +1,4 @@
-//! Full-screen ratatui TUI for api-anything.
+//! Full-screen ratatui TUI for Thumper (thump). Living plasma, native Bun telemetry, celebration toasts.
 //! Entry point: `run()`. Called from main when the user wants the interactive dashboard.
 //!
 //! This is intentionally lightweight. The heavy lifting (real registry, generate wizard,
@@ -9,8 +9,10 @@ pub mod job;
 pub mod startup;
 pub mod styles;
 pub mod widgets;
+pub mod state;
+pub mod handlers;
 
-pub use app::GenUpdate;
+pub use state::GenUpdate;
 
 use anyhow::Result;
 use crossterm::{

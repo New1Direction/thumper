@@ -1,7 +1,7 @@
 //! CLI handler for the `bun` subcommand family.
 //!
 //! Wires the Bun execution layer to both:
-//! - Headless CLI usage (`api-anything bun script run dev`)
+//! - Headless CLI usage (`thump bun script run dev`) — any alias works
 //! - TUI Jobs panel (via optional GenUpdate channel)
 //!
 //! All execution goes through the smart selector in `bun::execution` which
@@ -118,32 +118,58 @@ async fn spawn_bun_job(
     task::spawn(async move {
         match spawn_bun(inv).await {
             Ok(mut stream) => {
+                // Rolling window: keep only the last 4 stderr lines for diagnostics
+                let mut stderr_window: std::collections::VecDeque<String> =
+                    std::collections::VecDeque::with_capacity(4);
+
                 while let Some(item) = stream.rx.recv().await {
                     match item {
                         BunEventOrOutcome::Event(ev) => {
+                            // Capture stderr lines into the rolling window
+                            if ev.event.ends_with(".stderr") {
+                                if let Some(raw) = ev.data.get("raw").and_then(|v| v.as_str()) {
+                                    if stderr_window.len() == 4 {
+                                        stderr_window.pop_front();
+                                    }
+                                    stderr_window.push_back(raw.to_string());
+                                }
+                            }
+
                             // Forward the *full* rich native event name (bun.native.<verb>.<stream>)
                             // and now also the structured telemetry from Chunk 10 parser.
                             let stage = ev.event.clone();
 
-                            let raw = ev.data.get("raw").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+                            let raw = ev
+                                .data
+                                .get("raw")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .trim()
+                                .to_string();
 
                             // Use real percent from the native BunOutputParser when available (Chunk 11)
-                            let pct = ev.data
+                            let pct = ev
+                                .data
                                 .get("percent")
                                 .and_then(|v| v.as_u64())
                                 .map(|p| p as u8)
                                 .unwrap_or_else(|| {
-                                    if ev.event.contains("started") { 20 }
-                                    else if ev.event.contains("exited") { 90 }
-                                    else { 50 }
+                                    if ev.event.contains("started") {
+                                        20
+                                    } else if ev.event.contains("exited") {
+                                        90
+                                    } else {
+                                        50
+                                    }
                                 });
 
                             // Include speed in the displayed msg when present (visible in jobs + footer)
-                            let msg = if let Some(sp) = ev.data.get("speed").and_then(|v| v.as_str()) {
-                                format!("{} [{}]", raw, sp)
-                            } else {
-                                raw
-                            };
+                            let msg =
+                                if let Some(sp) = ev.data.get("speed").and_then(|v| v.as_str()) {
+                                    format!("{} [{}]", raw, sp)
+                                } else {
+                                    raw
+                                };
 
                             let _ = tx_for_task.send(GenUpdate::Progress {
                                 tool: tool_for_task.clone(),
@@ -168,9 +194,13 @@ async fn spawn_bun_job(
                                     .unwrap_or_default();
                                 let err = format!("Bun operation failed{}", code);
 
+                                // Drain the last 4 stderr lines into the diagnostics payload
+                                let diagnostics: Vec<String> = stderr_window.drain(..).collect();
+
                                 let _ = tx_for_task.send(GenUpdate::Error {
                                     tool: tool_for_task.clone(),
                                     err,
+                                    diagnostics,
                                 });
                             }
                         }
@@ -181,6 +211,7 @@ async fn spawn_bun_job(
                 let _ = tx_for_task.send(GenUpdate::Error {
                     tool: tool_for_task,
                     err: e.to_string(),
+                    diagnostics: vec![],
                 });
             }
         }

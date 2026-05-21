@@ -12,7 +12,7 @@ import tempfile
 import json
 from pathlib import Path
 
-from cli_anything_bun.package import (
+from thump.package import (
     add as package_add,
     install as package_install,
     remove as package_remove,

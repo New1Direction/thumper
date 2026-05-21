@@ -1,6 +1,8 @@
-# AGENTS.md — API Anything Development Rules
+# AGENTS.md — Thumper (thumper-cli) Development Rules
 
-> This file governs all AI-assisted work on the `api-anything` crate (the native Rust "get an API from anything" TUI + CLI + ACP binary).
+> This file governs all AI-assisted work on the `thumper-cli` crate — the native Rust Thumper TUI & CLI (binary names: thump / thumper / bunny / thump-cli) with rich Bun telemetry, plasma visualization, and a smart Python `thump` proxy layer.
+
+The project was previously known as `api-anything` during its early "get an API from anything" phase. The identity, command surface, and delight layer are now fully Thumper.
 
 ## Core Principles (inherited from agent-of-empires + RedMicro rigor)
 1. **No dead code.** Every module, function, and type must be used. Run `cargo clippy -- -D warnings` and `cargo build` clean before committing.
@@ -47,6 +49,7 @@ src/
 
 ## Python Bridge & Generator
 - `generator/python_bridge.rs` is the **only** place that shells out to RedMicro python.
+- The `thump` Python package (`thump/process.py`) is the official semantic harness for Bun operations. It automatically prefers the native Rust runner (`thump internal run-bun`) via ancestry detection + `THUMP_PREFER_NATIVE_BUN`.
 - Always pass absolute paths, capture stdout/stderr, surface structured JSON errors.
 - Fallback: if bridge fails or `--no-python`, use the minimal native `engine.rs` templates.
 - Never hard-code paths to the user's RedMicro checkout; discover via `which python` + known relative locations or config.
@@ -72,7 +75,9 @@ src/
 - Escalate to the user via `ask_user_question` on architectural choices (new output lang, major registry schema change, etc.).
 - For `/implement` runs on this crate itself, use effort ≥2 and include the security + tests specialists when touching generators or ACP.
 
-This file is the single source of truth for the AI working on api-anything. Update it when layout or rules change.
+This file is the single source of truth for the AI working on Thumper / thumper-cli. Update it when the identity, layout, or rules change.
+
+The heart of the current system is the native Bun execution layer + living plasma TUI. Keep that experience joyful and fast.
 
 ---
 *Initial version created during Phase 0 scaffolding. Adapted from agent-of-empires/AGENTS.md + RedMicro rigor + CLI-Anything test philosophy.*

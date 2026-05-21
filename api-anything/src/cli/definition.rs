@@ -7,15 +7,16 @@ use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "api-anything",
+    name = "thump",
     version,
-    about = "Get an API (and a harness) from anything — native TUI + headless + ACP",
-    long_about = "API Anything turns arbitrary tools, binaries, and descriptions into typed, \
-                  agent-callable JSON APIs and CLI harnesses. Full-screen TUI, headless JSON, \
-                  ACP/IDE Protocol, and daemon mode.",
-    after_help = "Examples:\n  api-anything                     # launch full-screen TUI\n  \
-                  api-anything generate bettercap --json\n  api-anything agent stdio\n  \
-                  api-anything serve --port 2481"
+    about = "Thumper — The delightful native Bun TUI & CLI with rich telemetry",
+    long_about = "Thumper (command: thump) is the joyful native-first Bun runtime, TUI, and harness tool. \
+                  Full-screen ratatui interface with live plasma, native Bun execution (install/run), \
+                  headless JSON/streaming, ACP/IDE Protocol, and daemon mode. Aliases: thumper, bunny, thump-cli.",
+    after_help = "Examples:\n  thump                            # launch full-screen TUI (primary)\n  \
+                  thump generate bettercap --json\n  thump agent stdio\n  \
+                  thump serve --port 2481\n  \
+                  (aliases also work: thumper, bunny, thump-cli)"
 )]
 pub struct Cli {
     /// Optional profile name (isolates registry, config, generated artifacts)
@@ -41,6 +42,14 @@ pub struct Cli {
     /// Suppress all non-essential output (useful in agents / CI)
     #[arg(long, global = true)]
     pub quiet: bool,
+
+    /// Print process ancestry diagnostics and exit (useful for debugging native Bun selection)
+    #[arg(long, global = true, hide = true)]
+    pub debug_ancestry: bool,
+
+    /// Launch the interactive Thumper Flight Deck onboarding experience
+    #[arg(long, global = true, hide = true)]
+    pub demo: bool,
 
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -112,22 +121,6 @@ pub enum Commands {
         command: AgentCommands,
     },
 
-    /// Start the HTTP/WebSocket daemon (API surface for remote agents + web)
-    #[cfg(feature = "serve")]
-    Serve {
-        /// Bind address
-        #[arg(long, default_value = "127.0.0.1:2481")]
-        bind: String,
-
-        /// Run in background (daemonize on Unix)
-        #[arg(long)]
-        daemon: bool,
-
-        /// Path to write PID file
-        #[arg(long)]
-        pidfile: Option<PathBuf>,
-    },
-
     /// Diagnose environment (python bridge, registry, templates, permissions)
     Doctor {
         /// Emit structured JSON report
@@ -142,9 +135,8 @@ pub enum Commands {
     },
 
     // Internal commands are defined below the main enum for clarity.
-
     /// Drive the Bun semantic harness (scripts, package management)
-    /// Uses the Python cli-anything-bun adapter under the hood.
+    /// Powered by the Python `thump` package (auto-promotes to native Rust runner when possible).
     Bun {
         #[command(subcommand)]
         command: BunCommands,
@@ -265,16 +257,23 @@ pub enum AgentCommands {
     },
 }
 
-/// Internal commands used by the Python bridge / absorb tooling to delegate
-/// work back to the native Rust binary (especially for Bun execution).
+/// Internal commands used by the Python bridge / absorb tooling (`thump` package)
+/// to delegate work back to the native Rust binary (especially for Bun execution).
 #[derive(Subcommand, Debug)]
 pub enum InternalCommands {
     /// Execute a Bun command using the best available runner (native preferred).
-    /// Streams events as NDJSON. Intended for use by `cli_anything_bun` when
-    /// running under api-anything.
+    /// Streams events as NDJSON. Intended for use by the `thump` Python package when
+    /// running under thump / thumper / bunny / thump-cli (or legacy api-anything).
     RunBun {
         #[command(subcommand)]
         command: BunCommands,
+    },
+
+    /// Print detailed process ancestry diagnostics (for debugging native Bun selection).
+    DebugAncestry {
+        /// Output structured data instead of human-readable text
+        #[arg(long)]
+        json: bool,
     },
 }
 

@@ -1,6 +1,8 @@
-# cli-anything-bun
+# thump (Thumper Bun harness)
 
 **Semantic harness for Bun** — a clean, observable, agent-native layer over the Bun JavaScript runtime.
+
+Part of the Thumper project (`thump` binary). The Rust side now provides the preferred native execution path.
 
 This Python package provides a structured, event-driven interface for running Bun commands (`bun run`, `bun add`, `bun install`, `bun remove`, etc.) while emitting a stable NDJSON event stream.
 
@@ -23,15 +25,15 @@ It is designed to be used from:
 ## Installation (development)
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/cli-anything-bun.git
-cd cli-anything-bun
+git clone https://github.com/redmicro/api-anything.git
+cd api-anything/thump   # or pip install -e . from the thump/ directory
 pip install -e .
 ```
 
 Or run directly:
 
 ```bash
-python -m cli_anything_bun --help
+python -m thump --help
 ```
 
 ## Usage
@@ -39,7 +41,7 @@ python -m cli_anything_bun --help
 ### From Python
 
 ```python
-from cli_anything_bun import script_run, package_add
+from thump import script_run, package_add
 
 result = script_run("dev", cwd="my-project")
 result = package_add(["hono", "zod"], cwd="my-project", dev=True)
@@ -48,9 +50,9 @@ result = package_add(["hono", "zod"], cwd="my-project", dev=True)
 ### From CLI
 
 ```bash
-python -m cli_anything_bun script run dev
-python -m cli_anything_bun package add hono --dev
-python -m cli_anything_bun package install
+python -m thump script run dev
+python -m thump package add hono --dev
+python -m thump package install
 ```
 
 ### Streaming events
@@ -67,7 +69,7 @@ This makes it trivial to consume from Rust, Go, another Python process, or an ag
 ```
 Bun CLI
    ↓
-cli_anything_bun (Python semantic layer)
+thump (Python semantic layer)
    ↓
 Stable NDJSON event stream + final results
    ↓
@@ -76,7 +78,7 @@ Consumers: CLI • TUI Jobs • ACP agents • Rust adapter
 
 ## Related Projects
 
-- [api-anything](https://github.com/YOUR_USERNAME/api-anything) — The Rust TUI/CLI/ACP frontend that drives this harness.
+- [thump](https://github.com/redmicro/api-anything) — The Rust TUI/CLI (Thumper) — primary binary with native Bun execution.
 
 ## Status
 

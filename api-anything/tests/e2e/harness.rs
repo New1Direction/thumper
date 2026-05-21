@@ -56,22 +56,33 @@ pub(crate) use require_tmux;
 // RedMicro availability (for generate E2E tests that exercise the real bridge)
 // ---------------------------------------------------------------------------
 
-fn redmicro_available() -> bool {
-    if std::env::var("REDMICRO_ROOT").is_ok() {
-        return true;
+fn redmicro_root() -> PathBuf {
+    // 1. Explicit env var (recommended for CI / other devs)
+    if let Ok(p) = std::env::var("REDMICRO_ROOT") {
+        return PathBuf::from(p);
     }
-    let candidates = [
-        "/Users/clubpenguin/.grok/skills/redmicro",
-        "/Users/clubpenguin/Documents/redmicro",
-        "/opt/redmicro",
-    ];
-    for c in &candidates {
-        let p = Path::new(c).join("supporting-tools/api-harness/api_wrapper_generator.py");
-        if p.exists() {
-            return true;
+
+    // 2. Original locations relative to home directory, plus /opt/redmicro
+    let mut candidates = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(".grok/skills/redmicro"));
+        candidates.push(home.join("Documents/redmicro"));
+    }
+    candidates.push(PathBuf::from("/opt/redmicro"));
+
+    for p in &candidates {
+        if p.join("supporting-tools/api-harness/api_wrapper_generator.py").exists() {
+            return p.clone();
         }
     }
-    false
+
+    // 3. Last resort fallback
+    std::env::temp_dir().join("redmicro-test")
+}
+
+fn redmicro_available() -> bool {
+    let root = redmicro_root();
+    root.join("supporting-tools/api-harness/api_wrapper_generator.py").exists()
 }
 
 // ---------------------------------------------------------------------------
@@ -99,7 +110,7 @@ impl TuiTestHarness {
         let config_dir = app_dir_in(home_dir.path());
         let _ = std::fs::create_dir_all(&config_dir);
 
-        let binary_path = assert_cmd::cargo::cargo_bin("api-anything");
+        let binary_path = assert_cmd::cargo::cargo_bin("thump");
 
         Self {
             session_name,
@@ -150,6 +161,7 @@ impl TuiTestHarness {
             .env("PATH", self.env_path())
             .env("TERM", "xterm-256color")
             .env("API_ANYTHING_QUIET", "1")
+            .env("REDMICRO_ROOT", redmicro_root())
             .output()
             .expect("failed to run tmux new-session");
 
@@ -279,6 +291,7 @@ impl TuiTestHarness {
             .env("XDG_CONFIG_HOME", self.home_dir.path().join(".config"))
             .env("PATH", self.env_path())
             .env("TERM", "xterm-256color")
+            .env("REDMICRO_ROOT", redmicro_root())
             .env_remove("RUST_LOG")
             .output()
             .expect("failed to run api-anything CLI")

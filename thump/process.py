@@ -1,17 +1,17 @@
 """
-Process runner abstraction for cli-anything-bun.
+Process runner abstraction for thump (Thumper's Bun semantic layer).
 
 Provides live, observable execution of child processes (Bun commands,
 scripts, dev servers, etc.) while preserving raw output and emitting
 structured events through the stable envelope.
 
-Supports transparent delegation to the native Rust Bun executor.
+Supports transparent delegation to the native Rust Bun executor (thump internal run-bun).
 
 The decision is made by `should_prefer_native_bun()` which checks:
-- Explicit env var `API_ANYTHING_PREFER_NATIVE_BUN`
-- Heuristic parent-process detection (are we running under `api-anything`?)
+- Explicit env var `THUMP_PREFER_NATIVE_BUN` (preferred) or legacy `API_ANYTHING_PREFER_NATIVE_BUN`
+- Heuristic parent-process detection (are we running under `thump`, `thumper`, `bunny`, `thump-cli`, or legacy `api-anything`?)
 
-This is the official thin shim (Chunk 15) for making the native execution
+This is the official thin shim for making the native execution
 layer the default during absorb and generation flows while remaining
 fully reversible and dependency-free.
 
@@ -36,6 +36,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -60,8 +61,9 @@ from .operations import Operation
 #   - Easy to disable
 #
 # Control:
-#   API_ANYTHING_PREFER_NATIVE_BUN=1     → Force native
-#   API_ANYTHING_PREFER_NATIVE_BUN=0     → Force system `bun`
+#   THUMP_PREFER_NATIVE_BUN=1            → Force native (new canonical)
+#   API_ANYTHING_PREFER_NATIVE_BUN=1     → Force native (legacy fallback)
+#   THUMP_PREFER_NATIVE_BUN=0            → Force system `bun`
 #   Unset                                → Use heuristic (parent process detection)
 # ---------------------------------------------------------------------------
 
@@ -71,88 +73,32 @@ def should_prefer_native_bun() -> bool:
     the system `bun` binary.
 
     Detection order (highest priority first):
-    1. Explicit environment variable override
-    2. Heuristic: we appear to be running as a child of the `api-anything` binary
+    1. Explicit environment variable override (THUMP_PREFER_NATIVE_BUN preferred, falls back to legacy API_ANYTHING_*)
+    2. Environmental active indicator: THUMP_PARENT_ACTIVE or legacy API_ANYTHING_PARENT_ACTIVE env var is set to "1"
     3. Default: False (stay on system `bun`)
     """
-    env = os.environ.get("API_ANYTHING_PREFER_NATIVE_BUN", "").lower().strip()
-    if env in ("1", "true", "yes", "on"):
-        return True
-    if env in ("0", "false", "no", "off"):
-        return False
+    # 1. New canonical env var first
+    override = os.environ.get("THUMP_PREFER_NATIVE_BUN")
+    if override is None:
+        # Fallback to old env var name if users have it cached from earlier builds
+        override = os.environ.get("API_ANYTHING_PREFER_NATIVE_BUN")
 
-    # Heuristic: are we a descendant of the api-anything process?
-    if _is_running_under_api_anything():
+    if override is not None:
+        val = override.lower().strip()
+        if val in ("1", "true", "yes", "on"):
+            return True
+        if val in ("0", "false", "no", "off"):
+            return False
+
+    # 2. Environmental parent indicator
+    if os.environ.get("THUMP_PARENT_ACTIVE") == "1":
+        return True
+    if os.environ.get("API_ANYTHING_PARENT_ACTIVE") == "1":
+        return True
+    if os.environ.get("THUMP_FORCE_NATIVE", "").lower() in ("1", "true", "yes"):
         return True
 
     return False
-
-
-def _is_running_under_api_anything(max_depth: int = 8) -> bool:
-    """
-    Best-effort detection of whether the current process is a child of
-    the `api-anything` binary.
-
-    Walks up the process tree using /proc (preferred) and falls back to `ps`.
-    This is intentionally lightweight and may return False negatives on
-    some systems (e.g. containers without /proc or ps).
-    """
-    try:
-        pid = os.getpid()
-        for _ in range(max_depth):
-            if pid <= 1:
-                break
-
-            # Try Linux/macOS /proc first (fast and reliable in dev environments)
-            try:
-                with open(f"/proc/{pid}/cmdline", "rb") as f:
-                    cmdline = f.read().split(b"\0")[0].decode(errors="ignore")
-                    if "api-anything" in cmdline:
-                        return True
-            except (FileNotFoundError, PermissionError, OSError):
-                pass
-
-            # Fallback: use ps (works on macOS, Linux, BSD)
-            try:
-                result = subprocess.run(
-                    ["ps", "-p", str(pid), "-o", "command="],
-                    capture_output=True,
-                    text=True,
-                    timeout=0.6,
-                )
-                if result.returncode == 0 and "api-anything" in result.stdout:
-                    return True
-            except Exception:
-                pass
-
-            # Get parent pid
-            parent_pid = None
-            try:
-                with open(f"/proc/{pid}/stat", "r") as f:
-                    # Format: pid (comm) state ppid ...
-                    parts = f.read().split()
-                    parent_pid = int(parts[3])
-            except Exception:
-                try:
-                    result = subprocess.run(
-                        ["ps", "-p", str(pid), "-o", "ppid="],
-                        capture_output=True,
-                        text=True,
-                        timeout=0.6,
-                    )
-                    if result.returncode == 0:
-                        parent_pid = int(result.stdout.strip())
-                except Exception:
-                    break
-
-            if parent_pid is None or parent_pid == pid:
-                break
-            pid = parent_pid
-
-        return False
-    except Exception:
-        # Never let detection errors affect normal operation
-        return False
 
 
 def get_bun_executor() -> str:
@@ -160,13 +106,15 @@ def get_bun_executor() -> str:
     Public helper: returns the executable that should be used to run Bun commands.
 
     Respects `should_prefer_native_bun()` (env var + parent process detection).
-    When native is preferred and `api-anything` is in PATH, returns the Rust
-    binary so that commands are delegated to the native execution layer.
+    When native is preferred, prefers `thump` (or any of its aliases) in PATH,
+    falling back to legacy `api-anything` during transition.
     """
     if should_prefer_native_bun():
-        exe = shutil.which("api-anything")
-        if exe:
-            return exe
+        # Try the new primary binary first, then aliases, then legacy name
+        for candidate in ["thump", "thumper", "bunny", "thump-cli", "api-anything"]:
+            exe = shutil.which(candidate)
+            if exe:
+                return exe
     return "bun"
 
 
@@ -187,7 +135,8 @@ def rewrite_bun_command(cmd: List[str]) -> List[str]:
         return cmd
 
     executor = get_bun_executor()
-    if executor != "bun" and "api-anything" in executor:
+    # Any of the Thumper-family binaries (or legacy) should trigger the internal delegation
+    if executor != "bun" and any(alias in executor for alias in ["thump", "thumper", "bunny", "thump-cli", "api-anything"]):
         # Rewrite to the internal native entry point
         return [executor, "internal", "run-bun"] + cmd[1:]
     return cmd
@@ -211,10 +160,10 @@ class Process:
     Context manager that runs a subprocess and streams its output as events.
 
     When `should_prefer_native_bun()` returns True (controlled by the
-    `API_ANYTHING_PREFER_NATIVE_BUN` environment variable or automatic
+    `THUMP_PREFER_NATIVE_BUN` environment variable or automatic
     parent-process detection), commands starting with `bun` are transparently
     rewritten (via `rewrite_bun_command`) to use the native Rust execution layer
-    (`api-anything internal run-bun ...`).
+    (`thump internal run-bun ...`).
 
     Raw output is emitted immediately using the raw_* helpers (process.stdout / process.stderr
     events with "raw" payload). Structured lifecycle events are also emitted.

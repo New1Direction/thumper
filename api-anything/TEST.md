@@ -5,7 +5,7 @@ Written before heavy implementation (Phase 1/2).
 ## Goals
 - Every `generate` path must emit the exact `GenerateResult` + `StreamEvent` contract defined in `src/cli/output.rs` and `src/cli/generate.rs`.
 - The python bridge must be exercised in E2E tests when the RedMicro tree is present.
-- `api-anything` binary (debug + release) must be testable via subprocess from the e2e harness.
+- `thump` (and aliases: thumper, bunny, thump-cli) binaries must be testable via subprocess from the e2e harness. The crate is `thumper-cli`.
 - 100% of the clap surface documented and round-trippable via `--help` + JSON.
 
 ## Unit Tests (to be added)
@@ -23,7 +23,7 @@ The harness (`TuiTestHarness`) was created in `tests/e2e/harness.rs` (plus `test
 - Automatic skips: `require_tmux!()` for TUI tests; `redmicro_available()` helper for generate tests (no hard failure when the external RedMicro tree is absent)
 
 Implemented tests (all live in harness.rs for a minimal foundation):
-- `test_generate_json` — runs `api-anything generate rustscan --json -o <temp>` , parses the `GenerateResult` schema (id/name/status/artifacts/duration_ms/output_dir), asserts a real on-disk file exists for each reported artifact.
+- `test_generate_json` — runs `thump generate rustscan --json -o <temp>` (or any alias), parses the `GenerateResult` schema...
 - `test_streaming` — runs with `--stream`, validates every stdout line is NDJSON with a `"type"` field (Progress/Artifact/End etc.), last event is `{"type":"end","status":"ok"}`.
 - `test_tui_basic` (stretch goal completed) — `spawn_tui()`, waits for "API ANYTHING" + "Registry" + "q quit", sends `q`, asserts the tmux session exits cleanly and is no longer alive.
 

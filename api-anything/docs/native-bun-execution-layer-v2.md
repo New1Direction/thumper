@@ -11,10 +11,10 @@
 
 The native Rust Bun execution engine (Phase 1, landed in Chunks 3–11) has proven highly successful:
 
-- Significantly faster startup than the Python `cli_anything_bun` harness
-- Zero Python dependency for the common interactive paths (palette, `b` key)
-- Rich, structured telemetry (`BunStage`, `ProgressMetrics`, speed, package counts, timing) that powers excellent TUI delight (stage-aware plasma, metric ribbon, celebration, etc.)
-- Clean fallback to Python when native is unavailable
+- Significantly faster startup than the legacy Python `cli_anything_bun` harness (now `thump`)
+- Zero Python dependency for the common interactive paths (palette `b` key, Jobs)
+- Rich, structured telemetry (`BunStage`, `ProgressMetrics`, speed, package counts, timing) that powers the living plasma bar, metric ribbon, and success-bunny celebrations
+- Clean, automatic fallback to the Python `thump` package (which itself promotes to native via ancestry detection)
 
 However, a major gap remains: **generation and absorb flows still route all Bun commands through the Python harness**.
 
@@ -87,7 +87,7 @@ Phase 1 makes this selector **the only entry point** for Bun execution from anyw
 
 ### 5.2 Integration with Generation/Absorb Flows
 
-The Python generator scripts currently shell out to `cli_anything_bun` (the installed Python package).
+The Python `thump` package (and older `cli_anything_bun`) is the semantic harness that generator / absorb flows use for Bun operations.
 
 Options (to be decided during implementation):
 
@@ -115,7 +115,7 @@ The existing `find_bun()` logic (BUN_INSTALL, `~/.bun`, `which`, common paths) r
 | Risk | Mitigation |
 |------|------------|
 | Behavioral differences between native runner and Python harness | Phase 1 will only support the verbs/options the TUI currently exercises. Any divergence will surface as a fallback to Python. |
-| Python generator scripts hard-depend on `cli_anything_bun` internals | Keep a thin delegation path; do not remove the Python package in Phase 1. |
+| Python generator scripts hard-depend on the `thump` / legacy `cli_anything_bun` harness | The `thump` package now intelligently delegates to native when parent is a Thumper binary. |
 | Windows support gaps | Explicitly document that Phase 1 targets Unix-first; Windows work is tracked separately. |
 | Performance regression in generation flows | The native path is expected to be faster; we will measure and fall back if needed. |
 | Event contract drift | All rich data is additive inside the existing `data: Value` field. No breaking changes. |

@@ -178,7 +178,7 @@ use serde::{Deserialize, Serialize};
 /// These verbs are used to produce nicer event names like `bun.native.install.stdout`.
 ///
 /// This is different from the Python harness `to_args()` (which targets
-/// `cli_anything_bun`).
+/// `thump` Python package).
 fn bun_command_to_cli_args_and_verb(cmd: &BunCommand) -> (Vec<String>, &'static str) {
     match cmd {
         BunCommand::ScriptRun { name, args } => {

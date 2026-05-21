@@ -106,15 +106,24 @@ fn platform_specific_candidates() -> Vec<PathBuf> {
             locations.push(profile.join(".bun").join("bin").join("bun.exe"));
 
             // Scoop (very common on Windows)
-            locations.push(profile.join("scoop").join("apps").join("bun").join("current").join("bun.exe"));
+            locations.push(
+                profile
+                    .join("scoop")
+                    .join("apps")
+                    .join("bun")
+                    .join("current")
+                    .join("bun.exe"),
+            );
         }
 
         // Global scoop (less common but possible)
-        locations.push(PathBuf::from("C:\\ProgramData\\scoop\\apps\\bun\\current\\bun.exe"));
+        locations.push(PathBuf::from(
+            "C:\\ProgramData\\scoop\\apps\\bun\\current\\bun.exe",
+        ));
     } else if cfg!(target_os = "macos") {
         // macOS common locations
-        locations.push(PathBuf::from("/opt/homebrew/bin/bun"));      // Apple Silicon Homebrew (new)
-        locations.push(PathBuf::from("/usr/local/bin/bun"));         // Intel Homebrew / manual
+        locations.push(PathBuf::from("/opt/homebrew/bin/bun")); // Apple Silicon Homebrew (new)
+        locations.push(PathBuf::from("/usr/local/bin/bun")); // Intel Homebrew / manual
         locations.push(PathBuf::from("/usr/bin/bun"));
 
         // Homebrew on Apple Silicon can also live here in some setups

@@ -8,7 +8,7 @@
 //!   speed and zero Python dependency.
 //! - On **any** failure to even start the native path (binary not found,
 //!   spawn error, permission issues, etc.), transparently fall back to the
-//!   battle-tested Python `cli_anything_bun` harness.
+//!   battle-tested (and now smart) Python `thump` harness.
 //! - Never swallow real runtime failures from a successfully started native
 //!   process (those are reported via `BunOutcome` with the real exit code).
 //!
@@ -16,9 +16,9 @@
 //! flows, ACP handlers) are expected to go through `spawn_bun` so they
 //! automatically get the best available execution strategy.
 
+use crate::bun::harness;
 use crate::bun::harness::BunInvocation;
 use crate::bun::native;
-use crate::bun::harness;
 
 pub use crate::bun::harness::BunStream;
 

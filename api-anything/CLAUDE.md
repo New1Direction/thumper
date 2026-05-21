@@ -3,7 +3,7 @@
 This is a **Rust** project (see `AGENTS.md` for the authoritative rules).
 
 ## Quick Orientation
-- Binary name: `api-anything`
+- Binary names: `thump` (primary), `thumper`, `bunny`, `thump-cli`. Crate: `thumper-cli`. The project was previously called api-anything.
 - The goal: native, fast, TUI + headless + ACP implementation of "get an API/harness from anything"
 - Primary reference implementation for architecture: `agent-of-empires` (sibling or nearby checkout)
 - Python bridge lives in RedMicro `supporting-tools/api-harness/`
@@ -26,7 +26,7 @@ cargo test --all-features
 The crate shells out to the RedMicro python tools by default. Make sure the path resolution in `generator/python_bridge.rs` is correct for the current machine.
 
 ## ACP Testing
-`api-anything agent stdio` speaks the real Agent Client Protocol. Use the same test clients that aoe's cockpit tests use.
+`thump agent stdio` (or any alias) speaks the real Agent Client Protocol. Use the same test clients that aoe's cockpit tests use.
 
 ## Do Not
 - Invent new magic registration systems.

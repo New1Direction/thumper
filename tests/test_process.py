@@ -9,7 +9,7 @@ import json
 import sys
 from io import StringIO
 
-from cli_anything_bun import Operation, Process, run_process
+from thump import Operation, Process, run_process
 
 
 def _capture(fn):

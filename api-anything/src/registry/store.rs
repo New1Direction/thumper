@@ -22,7 +22,7 @@ pub struct RegistryTool {
 
 fn registry_path() -> PathBuf {
     let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-    home.join(".api-anything").join("registry.json")
+    home.join(".api-anything").join("registry.json") // legacy path during Thumper rename; future versions may migrate to .thump or .thumper-cli
 }
 
 pub async fn register_generated(

@@ -1,10 +1,10 @@
 """
-Entry point for `python -m cli_anything_bun`.
+Entry point for `python -m thump`.
 
 This allows running the harness directly without installing it as a package:
 
-    python -m cli_anything_bun script run dev
-    python -m cli_anything_bun package add hono --dev
+    python -m thump script run dev
+    python -m thump package add hono --dev
 """
 
 from .cli import main

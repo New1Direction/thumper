@@ -1,8 +1,8 @@
 """
-cli-anything-bun
+thump
 
-Agent-oriented semantic layer over Bun.
-Phase 1: Event envelope + NDJSON emitter foundation.
+Thumper's agent-oriented semantic layer over Bun.
+Native Rust execution is the preferred fast path when launched under `thump`.
 """
 
 from .events import (
