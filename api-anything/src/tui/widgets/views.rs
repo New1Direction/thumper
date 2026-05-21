@@ -245,21 +245,13 @@ pub fn render_app(app: &App, f: &mut Frame) {
             base
         }
     } else {
-        let idle_tick = (app.frame / 14) % 5;
-        match idle_tick {
-            0 => "  · ",
-            1 => " 🐰 ",
-            2 => "  · ",
-            3 => "  ",
-            _ => "  ",
-        }
-        .to_string()
+        " 🐰 ".to_string()
     };
 
     // Rich header line with BunBunny branding (mauve) + metric ribbon on the right
     let header_line = Line::from(vec![
         Span::styled("🐰 ", styles::bunbunny_mauve()),
-        Span::styled("API ANYTHING", styles::bunbunny_mauve()),
+        Span::styled("THUMPER", styles::bunbunny_mauve()),
         Span::raw("  —  Get an API from anything"),
         Span::styled(absorb_badge, styles::header_style()),
         Span::styled(filter_badge, styles::header_style()),

@@ -179,11 +179,6 @@ impl App {
                 self.handle_gen_update(u);
             }
 
-            // Tick housekeeping (spinner, toasts, plasma sync)
-            // (we also tick inside select but do a sync check here for responsiveness)
-            self.frame = self.frame.wrapping_add(1);
-            self.update_toasts();
-
             tokio::select! {
                 // Keyboard / mouse - input returns Action, execution explicit
                 maybe_event = events.next() => {
@@ -194,14 +189,11 @@ impl App {
                     }
                 }
 
-                // Tick for animations / expiry
+                // Tick for animations / expiry (triggered every 120ms)
                 _ = tick.tick() => {
                     self.frame = self.frame.wrapping_add(1);
                     self.update_toasts();
                 }
-
-                // Small sleep
-                _ = sleep(Duration::from_millis(10)) => {}
             }
         }
 
@@ -1463,7 +1455,6 @@ impl App {
 
     /// Render the full frame. Beautiful warm industrial dashboard with live jobs + toasts.
     fn render(&mut self, f: &mut Frame) {
-        use ratatui::text::{Line, Span};
         // Show branded BunBunny startup screen for the first ~8 seconds
         if let Some(start) = self.startup_start {
             if crate::tui::startup::should_show_startup(start) {
@@ -1482,73 +1473,6 @@ impl App {
                 self.startup_start = None;
             }
         }
-
-        let size = f.area();
-
-        // When the Bun command palette is active, we expand the bottom area to exactly 2 lines.
-        // This creates a high-density, telemetry-rich bar (inspired by sharp CLI tools).
-        let bottom_height = if self.in_bun_command_mode { 2 } else { 3 };
-
-        // Dashboard layout (polished):
-        // header | body (registry list | preview) | jobs/activity | status / palette
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(3),             // header
-                Constraint::Min(10),               // body (list+preview)
-                Constraint::Length(9),             // jobs / activity panel
-                Constraint::Length(bottom_height), // status OR 2-line Bun palette
-            ])
-            .split(size);
-
-        // === Phase 3: Contextual Header + Metric Ribbon (Atmospheric Polish) ===
-        // BunBunny logo in Mocha Mauve + live native telemetry ribbon
-        let absorb_badge = if self.absorb_mode { " [ABSORB]" } else { "" };
-        let filter_badge = if !self.filter.is_empty() {
-            format!(" [filter:/{}]", self.filter)
-        } else if self.in_search_mode {
-            " [search...]".to_string()
-        } else {
-            String::new()
-        };
-
-        // Find the most "alive" native Bun job for the metric ribbon
-        let live_metric = self.jobs.iter().rev().find(|j| {
-            j.tool.starts_with("bun:") || j.tool.contains("package:") || j.tool.contains("script:")
-        });
-
-        // Build the metric ribbon (tiny live meter using velocity + performance)
-        let metric_ribbon: String = if let Some(job) = live_metric {
-            let vel = job.bun_package_count as f32 / 20.0
-                + if job.status == "running" { 0.3 } else { 0.0 };
-            let perf = job.performance_score.unwrap_or(60.0) / 100.0;
-            let energy = ((vel + perf) / 2.0).clamp(0.1, 0.95);
-
-            // Compact braille sparkline / meter (5 cells)
-            let bars = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
-            let idx = ((energy * (bars.len() - 1) as f32) as usize).min(bars.len() - 1);
-            let base = format!(
-                "  {}  {:.0}%",
-                bars[idx],
-                job.performance_score.unwrap_or(0.0)
-            );
-            if let Some(sp) = &job.bun_speed {
-                format!("{}  {}", base, sp)
-            } else {
-                base
-            }
-        } else {
-            // Phase 4 micro idle delight: very subtle BunBunny ear twitch / slow pulse when quiet
-            let idle_tick = (self.frame / 14) % 5;
-            match idle_tick {
-                0 => "  · ",
-                1 => " 🐰 ",
-                2 => "  · ",
-                3 => "  ",
-                _ => "  ",
-            }
-            .to_string()
-        };
 
         // Rich header line with BunBunny branding (mauve) + metric ribbon on the right
         super::widgets::views::render_app(self, f);
