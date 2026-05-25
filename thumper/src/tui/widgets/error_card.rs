@@ -36,7 +36,7 @@ pub fn render_diagnostic_error_card(
     let title_len = title.chars().count();
     let border_len = (width - 2).max(title_len + 4);
     let top = format!(
-        "╭─ {} {:─<width$}╮",
+        "┌─ {} {:─<width$}┐",
         title,
         "",
         width = border_len.saturating_sub(title_len + 3)
@@ -153,7 +153,7 @@ pub fn render_diagnostic_error_card(
     }
 
     // Bottom border
-    let bottom = format!("╰{:─<width$}╯", "", width = width - 2);
+    let bottom = format!("└{:─<width$}┘", "", width = width - 2);
     lines.push(Line::from(Span::styled(
         bottom,
         Style::default().fg(MOCHA_RED).add_modifier(Modifier::BOLD),

@@ -165,12 +165,41 @@ use crate::bun::harness::{BunCommand, BunInvocation, BunStream};
 use chrono::Utc;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::collections::VecDeque;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex};
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+
+#[derive(Clone)]
+pub struct CircularLogBuffer {
+    inner: Arc<std::sync::Mutex<VecDeque<String>>>,
+    max_size: usize,
+}
+
+impl CircularLogBuffer {
+    pub fn new(max_size: usize) -> Self {
+        Self {
+            inner: Arc::new(std::sync::Mutex::new(VecDeque::with_capacity(max_size))),
+            max_size,
+        }
+    }
+
+    pub fn push(&self, line: String) {
+        let mut guard = self.inner.lock().unwrap();
+        if guard.len() >= self.max_size {
+            guard.pop_front();
+        }
+        guard.push_back(line);
+    }
+
+    pub fn get_all(&self) -> Vec<String> {
+        let guard = self.inner.lock().unwrap();
+        guard.iter().cloned().collect()
+    }
+}
 
 /// Convert a `BunCommand` into the real `bun` CLI arguments + a short stable verb.
 ///
@@ -265,14 +294,22 @@ pub async fn spawn_bun_native(inv: BunInvocation) -> Result<BunStream> {
     let verb_for_task = verb;
     let operation = verb_to_operation(verb);
 
-    // Spawn line pumps with rich parser (Chunk 10)
-    let tx_for_pumps = tx.clone();
-    let parser = BunOutputParser::new();
-    let child_for_pumps = child.clone();
+    // Spawn parallel line pumps with rich parser
+    let parser = Arc::new(BunOutputParser::new());
+    let log_buffer = CircularLogBuffer::new(500);
+
+    let tx_stdout = tx.clone();
+    let parser_stdout = parser.clone();
+    let log_buffer_stdout = log_buffer.clone();
     tokio::spawn(async move {
-        let p = parser; // move into the closure
-        let _ = pump_lines(stdout, &tx_for_pumps, verb_for_task, "stdout", Some(&p)).await;
-        let _ = pump_lines(stderr, &tx_for_pumps, verb_for_task, "stderr", Some(&p)).await;
+        let _ = pump_lines(stdout, &tx_stdout, verb_for_task, "stdout", Some(parser_stdout), log_buffer_stdout).await;
+    });
+
+    let tx_stderr = tx.clone();
+    let parser_stderr = parser;
+    let log_buffer_stderr = log_buffer;
+    tokio::spawn(async move {
+        let _ = pump_lines(stderr, &tx_stderr, verb_for_task, "stderr", Some(parser_stderr), log_buffer_stderr).await;
     });
 
     // Dedicated waiter task that gets the *real* exit code
@@ -505,7 +542,8 @@ async fn pump_lines(
     tx: &mpsc::UnboundedSender<BunEventOrOutcome>,
     verb: &str,
     stream: &str,
-    parser: Option<&BunOutputParser>,
+    parser: Option<Arc<BunOutputParser>>,
+    log_buffer: CircularLogBuffer,
 ) {
     let mut lines = BufReader::new(reader).lines();
 
@@ -515,10 +553,13 @@ async fn pump_lines(
             continue;
         }
 
+        // Push to thread-safe circular log buffer
+        log_buffer.push(clean.clone());
+
         let mut data = serde_json::json!({ "raw": clean });
 
         // Enrich with high-fidelity telemetry from the rich parser (Chunk 10)
-        if let Some(p) = parser {
+        if let Some(ref p) = parser {
             if let Some(metrics) = p.parse_line(&clean) {
                 // Merge parsed fields into the data payload.
                 // Existing consumers that only read "raw" continue to work unchanged.

@@ -1,10 +1,8 @@
 # Thumper (thump)
 
-**The delightful native Bun TUI & CLI with rich telemetry.**
+**The high-performance local execution and recovery substrate for Korgex.**
 
-Thumper is the high-performance, stage-aware native Bun runtime and full-screen ratatui experience. It gives you instant, beautiful feedback while you develop — whether you're installing packages, running scripts, absorbing tools, or generating production APIs.
-
-This is the joyful evolution of the earlier Python `cli-anything` + RedMicro system — now with a native Rust execution core that is the default happy path, backed by a smart Python `thump` proxy layer.
+Thumper is the execution and recovery layer of the **Korgex** agent runtime. It is not intended for standalone public use; its public interface is Korgex's agent API. It maintains rolling pre-warmed sandbox workspace pools, mounts toolchains, symlinks warm package caches, manages persistent background LSP connections, and performs sub-second local compile-error healing.
 
 ## Refactoring Achievements (May 2026)
 

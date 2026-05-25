@@ -139,6 +139,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<Action> {
         KeyCode::Char('?') => Some(Action::ShowHelp),
 
         KeyCode::Char('b') => Some(Action::TriggerBunJob),
+        KeyCode::Char('s') => Some(Action::TriggerSpeculativeDag),
 
         // Colon enters Bun command palette (very powerful for power users)
         KeyCode::Char(':') => Some(Action::OpenBunCommandPalette),
@@ -227,6 +228,9 @@ pub fn handle_action(app: &mut App, action: Action) {
         }
         Action::ExecutePredictiveRecovery => {
             app.execute_predictive_recovery();
+        }
+        Action::TriggerSpeculativeDag => {
+            app.trigger_speculative_dag();
         }
         Action::OpenBunCommandPalette => {
             app.in_bun_command_mode = true;

@@ -7,15 +7,20 @@
 //! events, etc.) and provides the canonical smart entry point `spawn_bun`
 //! that all higher layers should use.
 
+pub mod cache;
+pub mod dag;
 pub mod discovery;
 pub mod events;
 pub mod execution;
 pub mod harness;
 pub mod native;
 pub mod parent;
+pub mod pool;
+pub mod recovery;
 
 pub use discovery::find_bun;
 pub use events::{BunEvent, BunEventOrOutcome, BunOutcome, EventLevel};
 pub use execution::{spawn_bun, spawn_bun_python};
 pub use harness::{run_bun_command, BunCommand, BunInvocation, BunStream};
 pub use parent::{get_ancestry_diagnostics, get_ancestry_report, is_launched_by_thumper};
+pub use pool::{Sandbox, SandboxPool, SandboxStatus};

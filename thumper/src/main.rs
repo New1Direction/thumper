@@ -20,6 +20,9 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize standard SQLite database tables and run schema/data migration
+    crate::registry::sqlite::init_db().ok();
+
     let cli = cli::definition::Cli::parse();
 
     if cli.debug_ancestry {

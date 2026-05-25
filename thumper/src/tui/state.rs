@@ -284,4 +284,5 @@ pub enum Action {
     /// Trigger a predictive self-healing action for the most recent failed job
     /// (e.g. auto-running `bun install` after an ENOENT / missing lockfile error).
     ExecutePredictiveRecovery,
+    TriggerSpeculativeDag,
 }

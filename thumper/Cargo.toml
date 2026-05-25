@@ -38,6 +38,13 @@ regex = "1.0"
 
 # Async (needed even for basic streaming/bridge)
 tokio = { version = "1.44", features = ["full"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+sha2 = "0.10"
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+rand = "0.8"
+hex = "0.4"
+
+
 
 # TUI (feature = "tui")
 ratatui = { version = "0.30", features = ["crossterm"], optional = true }
@@ -62,6 +69,10 @@ serial_test = "3.2"
 tempfile = "3.10"
 assert_cmd = "2.0"
 predicates = "3.0"
+
+[lib]
+name = "thumper_cli"
+path = "src/lib.rs"
 
 [[bin]]
 name = "thump"

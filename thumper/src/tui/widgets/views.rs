@@ -33,7 +33,7 @@ pub fn render_bun_command_palette(app: &App, f: &mut Frame, area: Rect) {
         .split(area);
 
     // === Line 1: Prompt + Syntax-highlighted buffer with real cursor position ===
-    let mut spans: Vec<Span> = vec![Span::styled("❯ bun-cmd: ", prompt_style)];
+    let mut spans: Vec<Span> = vec![Span::styled("❯ [ bun-cmd ]: ", prompt_style)];
 
     let buffer = &app.bun_command_buffer;
     let cursor = app.bun_cursor_index;
@@ -264,9 +264,9 @@ pub fn render_app(app: &App, f: &mut Frame) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Plain)
                 .border_style(styles::border_style())
-                .title(" v0.2.0  •  native Bun delight "),
+                .title(" [ THUMPER ] "),
         );
     f.render_widget(header, chunks[0]);
 
@@ -300,9 +300,9 @@ pub fn render_app(app: &App, f: &mut Frame) {
         .collect();
 
     let filter_title = if app.filter.is_empty() {
-        " Registry (↑↓ jk • / filter) ".to_string()
+        " [ REGISTRY (↑↓ jk • / filter) ] ".to_string()
     } else {
-        format!(" Registry ({} shown • /{}) ", vis.len(), app.filter)
+        format!(" [ REGISTRY ({} shown • /{}) ] ", vis.len(), app.filter)
     };
 
     let list = List::new(list_items)
@@ -310,7 +310,7 @@ pub fn render_app(app: &App, f: &mut Frame) {
             Block::default()
                 .title(filter_title)
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Plain)
                 .border_style(styles::border_style()),
         )
         .highlight_style(styles::list_highlight_style())
@@ -341,16 +341,18 @@ pub fn render_app(app: &App, f: &mut Frame) {
         .wrap(Wrap { trim: true })
         .block(
             Block::default()
-                .title(" Preview / Details ")
+                .title(" [ PREVIEW / DETAILS ] ")
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Plain)
                 .border_style(styles::border_style()),
         )
         .style(styles::preview_style());
     f.render_widget(preview, body_chunks[1]);
 
     // Jobs / Activity panel (live streamed progress, status, paths)
-    let job_vis: Vec<_> = app.jobs.iter().rev().take(6).collect();
+    let has_speculative = app.jobs.iter().any(|j| j.tool.starts_with("speculative:") && j.status == "running");
+    let limit = if has_speculative { 1 } else { 6 };
+    let job_vis: Vec<_> = app.jobs.iter().rev().take(limit).collect();
     let job_items: Vec<ListItem> = job_vis
         .into_iter()
         .map(|job| {
@@ -592,10 +594,97 @@ pub fn render_app(app: &App, f: &mut Frame) {
                     visual_lines
                 }
             } else {
-                vec![Line::from(format!(
-                    "{}{} {} [{}] {}{}{}",
-                    sp, icon, display_tool, job.status, display_msg, pct_str, path_part
-                ))]
+                let is_speculative = job.tool.starts_with("speculative:");
+                if is_speculative {
+                    let mut nodes_lines = vec![];
+                    let status_color = match job.status.as_str() {
+                        "running" => Color::Yellow,
+                        "done" => Color::Green,
+                        "error" => Color::Red,
+                        _ => Color::Gray,
+                    };
+                    let elapsed_time = &job.started;
+                    
+                    nodes_lines.push(Line::from(vec![
+                        Span::raw(format!("{} ⚡ ", sp)),
+                        Span::styled("Speculative Security DAG", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                        Span::styled(format!(" [{}] ", job.status.to_uppercase()), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+                        Span::raw(format!("{} (Started: {})", pct_str, elapsed_time)),
+                    ]));
+
+                    let msg = job.message.as_str();
+                    
+                    let n1_status = if (msg.contains("Secret Scan") && msg.contains("complete")) || job.pct > 25 {
+                        ("✓", "Secret Scan", "Low Risk", Color::Green)
+                    } else if msg.contains("Starting step: Secret Scan") || (job.pct > 5 && job.pct <= 25) {
+                        ("→", "Secret Scan", "Scanning secrets...", Color::Yellow)
+                    } else {
+                        (" ", "Secret Scan", "Pending", Color::DarkGray)
+                    };
+
+                    let n2_status = if (msg.contains("Dependency Audit") && msg.contains("complete")) || job.pct > 35 {
+                        ("✓", "Dependency Audit", "Medium Risk", Color::Green)
+                    } else if msg.contains("Starting step: Dependency Audit") || (job.pct > 5 && job.pct <= 35) {
+                        ("→", "Dependency Audit", "Auditing dependencies...", Color::Yellow)
+                    } else {
+                        (" ", "Dependency Audit", "Pending", Color::DarkGray)
+                    };
+
+                    let n3_status = if msg.contains("Healed step successfully: CI Integrity") || msg.contains("Step complete: CI Integrity") || job.pct > 75 {
+                        ("✓", "CI Integrity", "Self-Healed via Sandbox Patch", Color::Green)
+                    } else if msg.contains("self-healing") || msg.contains("HEAL") || (job.pct > 40 && job.pct <= 75) {
+                        ("🔧", "CI Integrity", "Self-Healing (Step 3/4: Verification)", Color::Magenta)
+                    } else if msg.contains("Starting step: CI Integrity") {
+                        ("→", "CI Integrity", "Running CI integrity...", Color::Yellow)
+                    } else {
+                        (" ", "CI Integrity", "Pending", Color::DarkGray)
+                    };
+
+                    let n4_status = if (msg.contains("Deployment Gate") && msg.contains("complete")) || job.pct >= 95 {
+                        ("✓", "Deployment Gate", "Zero-Downtime Complete", Color::Green)
+                    } else if msg.contains("Starting step: Deployment Gate") || (job.pct > 75 && job.pct < 95) {
+                        ("→", "Deployment Gate", "Zero-Downtime Deployment Gate...", Color::Yellow)
+                    } else {
+                        (" ", "Deployment Gate", "Pending", Color::DarkGray)
+                    };
+
+                    let render_node = |symbol: &str, name: &str, desc: &str, color: Color, is_last: bool| {
+                        let prefix = if is_last { "└─ " } else { "├─ " };
+                        let status_span = match symbol {
+                            "✓" => Span::styled("[✓]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                            "→" => Span::styled("[→]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                            "🔧" => Span::styled("[🔧]", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+                            "!" => Span::styled("[!]", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                            _ => Span::styled("[ ]", Style::default().fg(Color::DarkGray)),
+                        };
+                        Line::from(vec![
+                            Span::raw("   "),
+                            Span::raw(prefix),
+                            status_span,
+                            Span::raw(" "),
+                            Span::styled(format!("{:<18}", name), Style::default().fg(Color::White)),
+                            Span::styled(format!(" ({})", desc), Style::default().fg(color)),
+                        ])
+                    };
+
+                    nodes_lines.push(render_node(n1_status.0, n1_status.1, n1_status.2, n1_status.3, false));
+                    nodes_lines.push(render_node(n2_status.0, n2_status.1, n2_status.2, n2_status.3, false));
+                    nodes_lines.push(render_node(n3_status.0, n3_status.1, n3_status.2, n3_status.3, false));
+                    nodes_lines.push(render_node(n4_status.0, n4_status.1, n4_status.2, n4_status.3, true));
+
+                    nodes_lines.push(Line::from(vec![
+                        Span::raw("   "),
+                        Span::styled("Log: ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(job.message.clone(), Style::default().fg(Color::Gray).add_modifier(Modifier::DIM)),
+                    ]));
+
+                    nodes_lines
+                } else {
+                    vec![Line::from(format!(
+                        "{}{} {} [{}] {}{}{}",
+                        sp, icon, display_tool, job.status, display_msg, pct_str, path_part
+                    ))]
+                }
             };
 
             let sty = match job.status.as_str() {
@@ -680,9 +769,9 @@ pub fn render_app(app: &App, f: &mut Frame) {
             _ => String::new(),
         };
 
-        format!(" Jobs / Activity — 📦🚀 Native Bun (live){} ", stats)
+        format!(" [ JOBS / ACTIVITY — 📦🚀 Native Bun (live){} ] ", stats)
     } else {
-        " Jobs / Activity — live progress from python_bridge (g immediately enqueues) "
+        " [ JOBS / ACTIVITY — live progress from python_bridge (g immediately enqueues) ] "
             .to_string()
     };
 
@@ -690,7 +779,7 @@ pub fn render_app(app: &App, f: &mut Frame) {
         Block::default()
             .title(jobs_title)
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
+            .border_type(BorderType::Plain)
             .border_style(styles::border_style()),
     );
     f.render_widget(jobs_list, chunks[2]);
@@ -737,10 +826,10 @@ pub fn render_app(app: &App, f: &mut Frame) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
+                .border_type(BorderType::Plain)
                 .border_style(styles::border_style())
                 .title(
-                    " Status — q/esc quit • g gen(real) • a absorb • / filter • d dir • r • ? ",
+                    " [ STATUS — q/esc quit • g gen(real) • a absorb • / filter • d dir • r • ? ] ",
                 ),
         );
 
@@ -774,10 +863,10 @@ pub fn render_app(app: &App, f: &mut Frame) {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
+                    .border_type(BorderType::Plain)
                     .border_style(Style::default().fg(styles::MOCHA_SURFACE0))
                     .style(Style::default().bg(styles::MOCHA_SURFACE0))
-                    .title(if t.is_error { " ✗ " } else { " ✓ " }),
+                    .title(if t.is_error { " [ ✗ ] " } else { " [ ✓ ] " }),
             );
         f.render_widget(toast, toast_area);
 

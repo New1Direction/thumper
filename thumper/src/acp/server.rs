@@ -15,11 +15,25 @@ use crate::bun::harness::{spawn_bun, BunCommand, BunInvocation};
 use crate::bun::BunEventOrOutcome;
 use anyhow::Result as AnyhowResult;
 use serde_json::{json, Value};
+use std::sync::Mutex;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AcpJob {
+    pub id: String,
+    pub tool: String,
+    pub status: String, // "in_progress", "completed", "failed"
+    pub message: String,
+    pub timestamp: String,
+    pub output_count: usize,
+}
+
+static ACP_JOBS: Mutex<Vec<AcpJob>> = Mutex::new(Vec::new());
+
 pub async fn run_stdio_server(yolo: bool) -> AnyhowResult<()> {
+    crate::cli::output::set_acp_mode(true);
     eprintln!("[api-anything-acp] Polished Bun ACP server (yolo={})", yolo);
-    eprintln!("[api-anything-acp] Tools exposed: bun_script_run, bun_package_add, bun_package_install, bun_package_remove");
+    eprintln!("[api-anything-acp] Tools exposed: bun_script_run, bun_package_add, bun_package_install, bun_package_remove, registry_list, jobs_list");
 
     let stdin = tokio::io::stdin();
     let mut reader = BufReader::new(stdin).lines();
@@ -62,6 +76,42 @@ async fn handle_structured_tool_call(params: &Value) {
         .get("id")
         .and_then(|v| v.as_str())
         .unwrap_or("unknown");
+
+    if name == "registry_list" {
+        let tag = args.get("tag").and_then(|v| v.as_str());
+        let mut tools = match crate::registry::store::load() {
+            Ok(data) => data.tools,
+            Err(_) => Vec::new(),
+        };
+        if let Some(t) = tag {
+            tools.retain(|tool| tool.kind.eq_ignore_ascii_case(t));
+        }
+        let result = json!({
+            "tools": tools,
+        });
+        send_tool_update(
+            tool_call_id,
+            "completed",
+            &serde_json::to_string_pretty(&result).unwrap_or_default(),
+        );
+        return;
+    }
+
+    if name == "jobs_list" {
+        let jobs = match ACP_JOBS.lock() {
+            Ok(j) => j.clone(),
+            Err(_) => Vec::new(),
+        };
+        let result = json!({
+            "jobs": jobs,
+        });
+        send_tool_update(
+            tool_call_id,
+            "completed",
+            &serde_json::to_string_pretty(&result).unwrap_or_default(),
+        );
+        return;
+    }
 
     let bun_cmd = match name {
         "bun_script_run" => BunCommand::ScriptRun {
@@ -139,6 +189,19 @@ async fn handle_structured_tool_call(params: &Value) {
         timeout: None,
     };
 
+    // Register start in jobs
+    let timestamp = chrono::Utc::now().to_rfc3339();
+    if let Ok(mut jobs) = ACP_JOBS.lock() {
+        jobs.push(AcpJob {
+            id: tool_call_id.to_string(),
+            tool: name.to_string(),
+            status: "in_progress".to_string(),
+            message: format!("Starting {} via cli-anything-bun...", name),
+            timestamp,
+            output_count: 0,
+        });
+    }
+
     // Announce start (rich update)
     send_tool_update(
         tool_call_id,
@@ -171,6 +234,15 @@ async fn handle_structured_tool_call(params: &Value) {
 }
 
 fn send_tool_update(tool_call_id: &str, status: &str, text: &str) {
+    // Also update our state tracking
+    if let Ok(mut jobs) = ACP_JOBS.lock() {
+        if let Some(job) = jobs.iter_mut().find(|j| j.id == tool_call_id) {
+            job.status = status.to_string();
+            job.message = text.to_string();
+            job.output_count += 1;
+        }
+    }
+
     let update = json!({
         "jsonrpc": "2.0",
         "method": "sessionUpdate",

@@ -851,6 +851,144 @@ impl App {
         }
     }
 
+    pub(crate) fn trigger_speculative_dag(&mut self) {
+        let tool_label = "speculative:security_audit".to_string();
+        self.last_action = "Triggering Speculative DAG...".to_string();
+
+        // Immediate visual feedback in Jobs panel
+        self.jobs.push(Job {
+            tool: tool_label.clone(),
+            status: "running".into(),
+            message: "Initializing Speculative DAG Scheduler...".to_string(),
+            pct: 5,
+            started: Utc::now().format("%H:%M:%S").to_string(),
+            output_path: None,
+            raw_output_count: 0,
+            last_raw_line: None,
+            bun_stage: Some("Initializing".to_string()),
+            bun_package_count: 0,
+            bun_timing: None,
+            bun_server_url: None,
+            bun_speed: None,
+            completion_flash_until: None,
+            performance_score: None,
+            error_diagnostics: None,
+        });
+
+        if let Some(tx) = &self.gen_tx {
+            let tx = tx.clone();
+
+            tokio::spawn(async move {
+                use crate::bun::dag::{DagNode, ExecutionDag, NodeStatus, SpeculativeScheduler};
+
+                // Construct the ExecutionDag
+                let mut dag = ExecutionDag::new("Speculative Security Audit & CI Deployment Gate");
+
+                dag.add_node(DagNode {
+                    id: "secret_scan".to_string(),
+                    name: "Secret Scan".to_string(),
+                    command: "thump scan --secrets".to_string(),
+                    dependencies: vec![],
+                    status: NodeStatus::Pending,
+                    confidence: 0.98,
+                    risk: "Low".to_string(),
+                    severity: "High".to_string(),
+                    blast_radius: "None".to_string(),
+                    certainty: 100.0,
+                    remediation_confidence: 1.0,
+                });
+
+                dag.add_node(DagNode {
+                    id: "dep_audit".to_string(),
+                    name: "Dependency Audit".to_string(),
+                    command: "thump audit --deps".to_string(),
+                    dependencies: vec![],
+                    status: NodeStatus::Pending,
+                    confidence: 0.92,
+                    risk: "Medium".to_string(),
+                    severity: "Medium".to_string(),
+                    blast_radius: "Scoped".to_string(),
+                    certainty: 100.0,
+                    remediation_confidence: 0.9,
+                });
+
+                dag.add_node(DagNode {
+                    id: "ci_integrity".to_string(),
+                    name: "CI Integrity".to_string(),
+                    command: "thump test --ci --fail".to_string(),
+                    dependencies: vec!["secret_scan".to_string(), "dep_audit".to_string()],
+                    status: NodeStatus::Pending,
+                    confidence: 0.85,
+                    risk: "High".to_string(),
+                    severity: "Critical".to_string(),
+                    blast_radius: "Cluster".to_string(),
+                    certainty: 80.0,
+                    remediation_confidence: 0.7,
+                });
+
+                dag.add_node(DagNode {
+                    id: "deploy_gate".to_string(),
+                    name: "Deployment Gate".to_string(),
+                    command: "thump deploy --gate".to_string(),
+                    dependencies: vec!["ci_integrity".to_string()],
+                    status: NodeStatus::Pending,
+                    confidence: 0.95,
+                    risk: "Low".to_string(),
+                    severity: "Critical".to_string(),
+                    blast_radius: "None".to_string(),
+                    certainty: 100.0,
+                    remediation_confidence: 1.0,
+                });
+
+                let mut scheduler = SpeculativeScheduler::new(dag);
+
+                let (logs_tx, mut logs_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+                // Spawn log stream parser to send Progress updates back to TUI
+                let tx_clone = tx.clone();
+                let tool_clone = tool_label.clone();
+                tokio::spawn(async move {
+                    let mut pct = 10;
+                    while let Some(log_line) = logs_rx.recv().await {
+                        pct = (pct + 5).min(95);
+                        let _ = tx_clone.send(GenUpdate::Progress {
+                            tool: tool_clone.clone(),
+                            stage: "speculative.scheduler".to_string(),
+                            pct,
+                            msg: log_line,
+                        });
+                    }
+                });
+
+                // Run the scheduler
+                match scheduler.run(Some(logs_tx)).await {
+                    Ok(final_exec) => {
+                        let _ = tx.send(GenUpdate::Progress {
+                            tool: tool_label.clone(),
+                            stage: "speculative.scheduler".to_string(),
+                            pct: 100,
+                            msg: "All levels completed successfully!".to_string(),
+                        });
+                        let _ = tx.send(GenUpdate::Done {
+                            tool: tool_label,
+                            path: format!("sqlite://registry.db/executions/{}", final_exec.id),
+                        });
+                    }
+                    Err(e) => {
+                        let _ = tx.send(GenUpdate::Error {
+                            tool: tool_label,
+                            err: format!("DAG Execution failed: {}", e),
+                            diagnostics: vec![e.to_string()],
+                        });
+                    }
+                }
+            });
+        } else {
+            self.status_message = "Gen progress channel not available".to_string();
+        }
+    }
+
+
     /// Parse and execute a command typed in the Bun command palette.
     pub(crate) fn execute_bun_command_from_palette(&mut self) {
         let input = self.bun_command_buffer.trim().to_string();
@@ -1280,177 +1418,6 @@ impl App {
             self.status_message = format!("No recorded path for {}. Guessed: ./{}", name, guessed);
             let _ = std::process::Command::new("open").arg(&guessed).spawn();
         }
-    }
-
-    /// Sharp, high-density 2-line Bun command palette (Grok Build CLI inspired).
-    /// Line 1: Prompt + live command buffer with cursor simulation + basic syntax highlighting
-    /// Line 2: Dense help with │ separators
-    fn render_bun_command_palette(&self, f: &mut Frame, area: Rect) {
-        use ratatui::layout::{Constraint, Direction, Layout};
-        use ratatui::text::{Line, Span};
-
-        let palette_style = styles::bun_palette_bg();
-        let prompt_style = styles::bun_prompt_style();
-        let help_style = styles::bun_help_style();
-        let cmd_style = Style::default()
-            .fg(styles::BRIGHT_CYAN)
-            .add_modifier(Modifier::BOLD);
-        let arg_style = Style::default().fg(Color::White);
-        let flag_style = Style::default().fg(Color::Yellow);
-
-        // Dark charcoal background block
-        let block = Block::default().style(palette_style).borders(Borders::TOP);
-
-        f.render_widget(block, area);
-
-        // Split the 2-line area
-        let line_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(1), Constraint::Length(1)])
-            .split(area);
-
-        // === Line 1: Prompt + Syntax-highlighted buffer with real cursor position ===
-        let mut spans: Vec<Span> = vec![Span::styled("❯ bun-cmd: ", prompt_style)];
-
-        let buffer = &self.bun_command_buffer;
-        let cursor = self.bun_cursor_index;
-
-        if buffer.is_empty() {
-            // Empty buffer → just show the cursor
-            spans.push(Span::styled(
-                "█",
-                Style::default()
-                    .fg(styles::BRIGHT_CYAN)
-                    .add_modifier(Modifier::SLOW_BLINK),
-            ));
-        } else {
-            // Build tokens with cursor awareness
-            let mut current_pos = 0;
-            let tokens: Vec<&str> = buffer.split_whitespace().collect();
-            let mut token_start_positions = vec![];
-            let mut pos = 0;
-
-            // Calculate start positions of each token in the original string
-            for token in &tokens {
-                if let Some(start) = buffer[pos..].find(token) {
-                    let abs_start = pos + start;
-                    token_start_positions.push(abs_start);
-                    pos = abs_start + token.len();
-                }
-            }
-
-            for (i, token) in tokens.iter().enumerate() {
-                let token_start = token_start_positions.get(i).copied().unwrap_or(0);
-                let token_end = token_start + token.len();
-
-                // Insert cursor if it's inside this token (or right before it)
-                if cursor > current_pos && cursor <= token_start {
-                    spans.push(Span::styled(
-                        "█",
-                        Style::default()
-                            .fg(styles::BRIGHT_CYAN)
-                            .add_modifier(Modifier::SLOW_BLINK),
-                    ));
-                }
-
-                // Determine style for this token
-                let style = if i == 0 {
-                    cmd_style
-                } else if token.starts_with("--") || token.starts_with("-") {
-                    flag_style
-                } else {
-                    arg_style
-                };
-
-                // Add the token (or split it if cursor is inside)
-                if cursor > token_start && cursor < token_end {
-                    // Cursor is inside this token
-                    let before = &token[..(cursor - token_start)];
-                    let after = &token[(cursor - token_start)..];
-                    if !before.is_empty() {
-                        spans.push(Span::styled(before, style));
-                    }
-                    spans.push(Span::styled(
-                        "█",
-                        Style::default()
-                            .fg(styles::BRIGHT_CYAN)
-                            .add_modifier(Modifier::SLOW_BLINK),
-                    ));
-                    if !after.is_empty() {
-                        spans.push(Span::styled(after, style));
-                    }
-                } else {
-                    spans.push(Span::styled(*token, style));
-                }
-
-                current_pos = token_end;
-
-                // Add space after token (except last)
-                if i < tokens.len() - 1 {
-                    current_pos += 1; // space
-                    if cursor == current_pos {
-                        spans.push(Span::styled(
-                            "█",
-                            Style::default()
-                                .fg(styles::BRIGHT_CYAN)
-                                .add_modifier(Modifier::SLOW_BLINK),
-                        ));
-                    } else {
-                        spans.push(Span::raw(" "));
-                    }
-                }
-            }
-
-            // Cursor after the last token
-            if cursor == current_pos {
-                spans.push(Span::styled(
-                    "█",
-                    Style::default()
-                        .fg(styles::BRIGHT_CYAN)
-                        .add_modifier(Modifier::SLOW_BLINK),
-                ));
-            }
-        }
-
-        let input_line = Line::from(spans);
-        let input = Paragraph::new(input_line).block(Block::default());
-        f.render_widget(input, line_chunks[0]);
-
-        // === Line 2: Dense help footer OR transient muted-red error (cleared on next keypress) ===
-        let (line2_text, line2_style) = if let Some(ref err) = self.palette_error_message {
-            (
-                format!("⚠ {}", err),
-                Style::default()
-                    .fg(styles::MUTED_RED)
-                    .add_modifier(Modifier::BOLD),
-            )
-        } else if !self.bun_command_buffer.trim().is_empty() {
-            // Phase 4: live palette preview with icon + native hint
-            let cmd = self.bun_command_buffer.trim();
-            let icon = if cmd.starts_with("add")
-                || cmd.starts_with("install")
-                || cmd.starts_with("remove")
-            {
-                "📦 "
-            } else if cmd.starts_with("run") || cmd.starts_with("script") {
-                "🚀 "
-            } else {
-                "🐰 "
-            };
-            let preview = format!("{}  {}  ·  native fast path", icon, cmd);
-            (preview, help_style)
-        } else {
-            (
-                "[Enter]: run  │  [↑↓]: history  │  [Tab]: complete  │  [Esc]: cancel".to_string(),
-                help_style,
-            )
-        };
-
-        let help = Paragraph::new(line2_text)
-            .style(line2_style)
-            .alignment(Alignment::Left);
-
-        f.render_widget(help, line_chunks[1]);
     }
 
     /// Render the full frame. Beautiful warm industrial dashboard with live jobs + toasts.
