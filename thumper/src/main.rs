@@ -20,8 +20,15 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize standard SQLite database tables and run schema/data migration
-    crate::registry::sqlite::init_db().ok();
+    // Initialize standard SQLite database tables and run schema/data migration.
+    // Don't fail the whole app on init error (registry is opt-in), but log
+    // loudly so a corrupt or read-only DB doesn't surface only as a cryptic
+    // I/O error several commands later.
+    if let Err(e) = crate::registry::sqlite::init_db() {
+        eprintln!(
+            "warning: registry init failed: {e}. Registry commands will not work this session."
+        );
+    }
 
     let cli = cli::definition::Cli::parse();
 

@@ -27,6 +27,11 @@ pub use crate::bun::harness::BunStream;
 /// This function implements the "native first, Python fallback" policy.
 /// It is intentionally a thin wrapper so the signature and semantics stay
 /// stable even as we expand native capabilities in future chunks.
+///
+/// The returned `BunStream` owns the child process. Dropping it without
+/// reading (e.g. `spawn_bun(inv).await.ok();`) leaks the process and its
+/// stdio — hence the `#[must_use]` lint.
+#[must_use = "await on the returned BunStream or spawn a handler task; dropping it leaks the child process"]
 pub async fn spawn_bun(inv: BunInvocation) -> anyhow::Result<BunStream> {
     // Fast path: try the pure-Rust native Bun runner first.
     // We clone the invocation because the native path takes ownership and
