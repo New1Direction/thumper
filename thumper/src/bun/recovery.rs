@@ -5,7 +5,20 @@ use anyhow::Result;
 use regex::Regex;
 use std::fs;
 use std::path::Path;
+use std::sync::OnceLock;
 use std::time::Instant;
+
+/// Compile a regex once and reuse it across calls. Each invocation site gets
+/// its own `OnceLock<Regex>` static via the `static R: OnceLock<Regex> = ...`
+/// pattern inside a block. This pre-compiles the regex on first use; every
+/// subsequent heal-call hit is a pointer chase, not a regex re-compile.
+/// (Audit Low — recovery is in the hot path during compile-error storms.)
+macro_rules! cached_regex {
+    ($pat:expr) => {{
+        static R: OnceLock<Regex> = OnceLock::new();
+        R.get_or_init(|| Regex::new($pat).unwrap())
+    }};
+}
 
 /// Intercept a failing command path and perform self-healing inside an isolated sandbox thread.
 /// Returns true if the node is successfully repaired/healed.
@@ -26,16 +39,24 @@ pub async fn heal_node_with_context(
     let start = Instant::now();
 
     if let Some(ref tx) = logs_tx {
-        let _ = tx.send(format!("  🔧 [HEAL] Intercepting execution failure from: '{}'", command));
+        let _ = tx.send(format!(
+            "  🔧 [HEAL] Intercepting execution failure from: '{}'",
+            command
+        ));
     }
 
     if let (Some(stderr_str), Some(path)) = (stderr, worktree_path) {
         if let Some(ref tx) = logs_tx {
-            let _ = tx.send("  🔧 [HEAL] [Step 1/4: Diagnosis] Running high-fidelity local error diagnosis...".to_string());
+            let _ = tx.send(
+                "  🔧 [HEAL] [Step 1/4: Diagnosis] Running high-fidelity local error diagnosis..."
+                    .to_string(),
+            );
         }
 
         // 1. Diagnose and heal missing semicolon
-        let re_semicolon = Regex::new(r"(?m)error: expected `;`[\s\S]*?-->\s*(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)").unwrap();
+        let re_semicolon = cached_regex!(
+            r"(?m)error: expected `;`[\s\S]*?-->\s*(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)"
+        );
         if let Some(caps) = re_semicolon.captures(stderr_str) {
             let file_rel = caps.name("file").unwrap().as_str().trim();
             let line_num: usize = caps.name("line").unwrap().as_str().parse().unwrap_or(0);
@@ -43,7 +64,10 @@ pub async fn heal_node_with_context(
             let file_abs = path.join(file_rel);
             if file_abs.exists() {
                 if let Some(ref tx) = logs_tx {
-                    let _ = tx.send(format!("  🔧 [HEAL] [Step 2/4: Patching] Diagnosed missing semicolon in {}", file_rel));
+                    let _ = tx.send(format!(
+                        "  🔧 [HEAL] [Step 2/4: Patching] Diagnosed missing semicolon in {}",
+                        file_rel
+                    ));
                 }
 
                 if let Ok(content) = fs::read_to_string(&file_abs) {
@@ -57,7 +81,8 @@ pub async fn heal_node_with_context(
 
                         if let Some(ref tx) = logs_tx {
                             let _ = tx.send(format!("  🔧 [HEAL]   - Original: '{}'", line.trim()));
-                            let _ = tx.send(format!("  🔧 [HEAL]   - Corrected: '{}'", new_line.trim()));
+                            let _ = tx
+                                .send(format!("  🔧 [HEAL]   - Corrected: '{}'", new_line.trim()));
                         }
 
                         lines[line_idx] = new_line;
@@ -75,7 +100,7 @@ pub async fn heal_node_with_context(
         }
 
         // 2. Diagnose and heal unused variable warning as error
-        let re_unused_var = Regex::new(r"(?m)error: unused variable:\s*`(?P<var>[^`]+)`[\s\S]*?-->\s*(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)").unwrap();
+        let re_unused_var = cached_regex!(r"(?m)error: unused variable:\s*`(?P<var>[^`]+)`[\s\S]*?-->\s*(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)");
         if let Some(caps) = re_unused_var.captures(stderr_str) {
             let file_rel = caps.name("file").unwrap().as_str().trim();
             let line_num: usize = caps.name("line").unwrap().as_str().parse().unwrap_or(0);
@@ -84,7 +109,10 @@ pub async fn heal_node_with_context(
             let file_abs = path.join(file_rel);
             if file_abs.exists() {
                 if let Some(ref tx) = logs_tx {
-                    let _ = tx.send(format!("  🔧 [HEAL] [Step 2/4: Patching] Diagnosed unused variable `{}` in {}", var_name, file_rel));
+                    let _ = tx.send(format!(
+                        "  🔧 [HEAL] [Step 2/4: Patching] Diagnosed unused variable `{}` in {}",
+                        var_name, file_rel
+                    ));
                 }
 
                 if let Ok(content) = fs::read_to_string(&file_abs) {
@@ -99,8 +127,12 @@ pub async fn heal_node_with_context(
                         if line.contains(&target_var) {
                             let new_line = line.replace(&target_var, &replacement_var);
                             if let Some(ref tx) = logs_tx {
-                                let _ = tx.send(format!("  🔧 [HEAL]   - Original: '{}'", line.trim()));
-                                let _ = tx.send(format!("  🔧 [HEAL]   - Corrected: '{}'", new_line.trim()));
+                                let _ =
+                                    tx.send(format!("  🔧 [HEAL]   - Original: '{}'", line.trim()));
+                                let _ = tx.send(format!(
+                                    "  🔧 [HEAL]   - Corrected: '{}'",
+                                    new_line.trim()
+                                ));
                             }
                             lines[line_idx] = new_line;
                             let new_content = lines.join("\n") + "\n";
@@ -118,7 +150,7 @@ pub async fn heal_node_with_context(
         }
 
         // 3. Diagnose and heal unused import warning as error
-        let re_unused_import = Regex::new(r"(?m)error: unused import:\s*`(?P<imp>[^`]+)`[\s\S]*?-->\s*(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)").unwrap();
+        let re_unused_import = cached_regex!(r"(?m)error: unused import:\s*`(?P<imp>[^`]+)`[\s\S]*?-->\s*(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)");
         if let Some(caps) = re_unused_import.captures(stderr_str) {
             let file_rel = caps.name("file").unwrap().as_str().trim();
             let line_num: usize = caps.name("line").unwrap().as_str().parse().unwrap_or(0);
@@ -127,7 +159,10 @@ pub async fn heal_node_with_context(
             let file_abs = path.join(file_rel);
             if file_abs.exists() {
                 if let Some(ref tx) = logs_tx {
-                    let _ = tx.send(format!("  🔧 [HEAL] [Step 2/4: Patching] Diagnosed unused import `{}` in {}", import_name, file_rel));
+                    let _ = tx.send(format!(
+                        "  🔧 [HEAL] [Step 2/4: Patching] Diagnosed unused import `{}` in {}",
+                        import_name, file_rel
+                    ));
                 }
 
                 if let Ok(content) = fs::read_to_string(&file_abs) {
@@ -139,7 +174,8 @@ pub async fn heal_node_with_context(
                         let new_line = format!("// {}", line);
                         if let Some(ref tx) = logs_tx {
                             let _ = tx.send(format!("  🔧 [HEAL]   - Original: '{}'", line.trim()));
-                            let _ = tx.send(format!("  🔧 [HEAL]   - Corrected: '{}'", new_line.trim()));
+                            let _ = tx
+                                .send(format!("  🔧 [HEAL]   - Corrected: '{}'", new_line.trim()));
                         }
                         lines[line_idx] = new_line;
                         let new_content = lines.join("\n") + "\n";
@@ -155,7 +191,9 @@ pub async fn heal_node_with_context(
         }
 
         // 4. JS/TS/Bun Missing Module / Package Auto-Installer
-        let re_missing_module = Regex::new(r"(?i)(?:Cannot find module|Cannot find package|Can't resolve)\s+'(?P<pkg>[@\w\-./]+)'").unwrap();
+        let re_missing_module = cached_regex!(
+            r"(?i)(?:Cannot find module|Cannot find package|Can't resolve)\s+'(?P<pkg>[@\w\-./]+)'"
+        );
         if let Some(caps) = re_missing_module.captures(stderr_str) {
             let pkg = caps.name("pkg").unwrap().as_str().trim();
             // Get base package name
@@ -172,7 +210,10 @@ pub async fn heal_node_with_context(
             };
 
             if let Some(ref tx) = logs_tx {
-                let _ = tx.send(format!("  🔧 [HEAL] [Step 2/4: Patching] Diagnosed missing package: '{}'", base_pkg));
+                let _ = tx.send(format!(
+                    "  🔧 [HEAL] [Step 2/4: Patching] Diagnosed missing package: '{}'",
+                    base_pkg
+                ));
             }
 
             let install_start = Instant::now();
@@ -193,9 +234,9 @@ pub async fn heal_node_with_context(
 
         // 5. Const Reassignment Healing (JS/TS/Bun)
         // Check for TypeScript/node/bun style error
-        let re_node_const = Regex::new(r"(?i)Assignment to constant variable").unwrap();
-        let re_at_file = Regex::new(r"(?m)at\s+(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)").unwrap();
-        let re_ts_const = Regex::new(r"(?m)^(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)\s+-\s+error TS2588: Cannot assign to '(?P<var>[^']+)'").unwrap();
+        let re_node_const = cached_regex!(r"(?i)Assignment to constant variable");
+        let re_at_file = cached_regex!(r"(?m)at\s+(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)");
+        let re_ts_const = cached_regex!(r"(?m)^(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)\s+-\s+error TS2588: Cannot assign to '(?P<var>[^']+)'");
 
         let mut matched_const = false;
         let mut file_rel = "";
@@ -234,7 +275,10 @@ pub async fn heal_node_with_context(
                                 lines[i] = lines[i].replace(&target, &format!("let {}", var_name));
                                 healed = true;
                                 if let Some(ref tx) = logs_tx {
-                                    let _ = tx.send(format!("  🔧 [HEAL]   - Rewrote '{}' to let", target));
+                                    let _ = tx.send(format!(
+                                        "  🔧 [HEAL]   - Rewrote '{}' to let",
+                                        target
+                                    ));
                                 }
                                 break;
                             }
@@ -246,7 +290,9 @@ pub async fn heal_node_with_context(
                                 lines[i] = lines[i].replace("const ", "let ");
                                 healed = true;
                                 if let Some(ref tx) = logs_tx {
-                                    let _ = tx.send("  🔧 [HEAL]   - Rewrote nearest const to let".to_string());
+                                    let _ = tx.send(
+                                        "  🔧 [HEAL]   - Rewrote nearest const to let".to_string(),
+                                    );
                                 }
                                 break;
                             }
@@ -268,11 +314,26 @@ pub async fn heal_node_with_context(
         }
 
         // 6. TS7006 Parameter Implicit 'any' Type Parameter Healing
-        let re_ts_any_err = Regex::new(r"(?m)(?:error TS7006: Parameter '(?P<param1>[^']+)' implicitly has an 'any' type.*-->\s*(?P<file1>[^\n:]+):(?P<line1>\d+):(?P<col1>\d+)|(?P<file2>[^\n:]+)\((?P<line2>\d+),(?P<col2>\d+)\): error TS7006: Parameter '(?P<param2>[^']+)' implicitly has an 'any' type)").unwrap();
+        let re_ts_any_err = cached_regex!(r"(?m)(?:error TS7006: Parameter '(?P<param1>[^']+)' implicitly has an 'any' type.*-->\s*(?P<file1>[^\n:]+):(?P<line1>\d+):(?P<col1>\d+)|(?P<file2>[^\n:]+)\((?P<line2>\d+),(?P<col2>\d+)\): error TS7006: Parameter '(?P<param2>[^']+)' implicitly has an 'any' type)");
         if let Some(caps) = re_ts_any_err.captures(stderr_str) {
-            let file_rel = caps.name("file1").or_else(|| caps.name("file2")).unwrap().as_str().trim();
-            let line_num: usize = caps.name("line1").or_else(|| caps.name("line2")).unwrap().as_str().parse().unwrap_or(0);
-            let param_name = caps.name("param1").or_else(|| caps.name("param2")).unwrap().as_str();
+            let file_rel = caps
+                .name("file1")
+                .or_else(|| caps.name("file2"))
+                .unwrap()
+                .as_str()
+                .trim();
+            let line_num: usize = caps
+                .name("line1")
+                .or_else(|| caps.name("line2"))
+                .unwrap()
+                .as_str()
+                .parse()
+                .unwrap_or(0);
+            let param_name = caps
+                .name("param1")
+                .or_else(|| caps.name("param2"))
+                .unwrap()
+                .as_str();
 
             let file_abs = path.join(file_rel);
             if file_abs.exists() {
@@ -287,12 +348,19 @@ pub async fn heal_node_with_context(
                         let line = &lines[line_idx];
 
                         // Safe word-boundary replacement of parameter name with typed equivalent
-                        let re_param = Regex::new(&format!(r"\b{}\b", regex::escape(param_name))).unwrap();
+                        let re_param =
+                            Regex::new(&format!(r"\b{}\b", regex::escape(param_name))).unwrap();
                         if re_param.is_match(line) {
-                            let new_line = re_param.replace(line, &format!("{}: any", param_name)).into_owned();
+                            let new_line = re_param
+                                .replace(line, &format!("{}: any", param_name))
+                                .into_owned();
                             if let Some(ref tx) = logs_tx {
-                                let _ = tx.send(format!("  🔧 [HEAL]   - Original: '{}'", line.trim()));
-                                let _ = tx.send(format!("  🔧 [HEAL]   - Corrected: '{}'", new_line.trim()));
+                                let _ =
+                                    tx.send(format!("  🔧 [HEAL]   - Original: '{}'", line.trim()));
+                                let _ = tx.send(format!(
+                                    "  🔧 [HEAL]   - Corrected: '{}'",
+                                    new_line.trim()
+                                ));
                             }
                             lines[line_idx] = new_line;
                             let new_content = lines.join("\n") + "\n";
@@ -310,10 +378,10 @@ pub async fn heal_node_with_context(
         }
 
         // 7. TS6133/6192/6196 Unused Local/Import/Variable Suppression Healing (TS/JS)
-        let re_paren = Regex::new(r"(?m)^(?P<file>[^\n:]+)\((?P<line>\d+),(?P<col>\d+)\):\s+error TS(?P<code>6133|6192|6196)").unwrap();
-        let re_colon_dash = Regex::new(r"(?m)^(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)\s+-\s+error TS(?P<code>6133|6192|6196)").unwrap();
-        let re_colon = Regex::new(r"(?m)^(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+):\s+error TS(?P<code>6133|6192|6196)").unwrap();
-        let re_multiline = Regex::new(r"(?m)error TS(?P<code>6133|6192|6196):[\s\S]*?-->\s*(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)").unwrap();
+        let re_paren = cached_regex!(r"(?m)^(?P<file>[^\n:]+)\((?P<line>\d+),(?P<col>\d+)\):\s+error TS(?P<code>6133|6192|6196)");
+        let re_colon_dash = cached_regex!(r"(?m)^(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)\s+-\s+error TS(?P<code>6133|6192|6196)");
+        let re_colon = cached_regex!(r"(?m)^(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+):\s+error TS(?P<code>6133|6192|6196)");
+        let re_multiline = cached_regex!(r"(?m)error TS(?P<code>6133|6192|6196):[\s\S]*?-->\s*(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)");
 
         let mut matched = false;
         let mut file_rel = "";
@@ -344,7 +412,8 @@ pub async fn heal_node_with_context(
         }
 
         if matched && !file_rel.is_empty() {
-            if let Some(caps_quote) = Regex::new(r"'([^']+)'").unwrap().captures(stderr_str) {
+            let re_quoted = cached_regex!(r"'([^']+)'");
+            if let Some(caps_quote) = re_quoted.captures(stderr_str) {
                 var_name = format!("'{}'", caps_quote.get(1).unwrap().as_str());
             }
 
@@ -360,11 +429,18 @@ pub async fn heal_node_with_context(
                         let line_idx = line_num - 1;
                         let line = lines[line_idx].clone();
 
-                        let leading_whitespace = line.chars().take_while(|c| c.is_whitespace()).collect::<String>();
+                        let leading_whitespace = line
+                            .chars()
+                            .take_while(|c| c.is_whitespace())
+                            .collect::<String>();
                         lines.insert(line_idx, format!("{}// @ts-ignore", leading_whitespace));
-                        
+
                         if let Some(ref tx) = logs_tx {
-                            let _ = tx.send(format!("  🔧 [HEAL]   - Added @ts-ignore above line {}: '{}'", line_num, line.trim()));
+                            let _ = tx.send(format!(
+                                "  🔧 [HEAL]   - Added @ts-ignore above line {}: '{}'",
+                                line_num,
+                                line.trim()
+                            ));
                         }
 
                         let new_content = lines.join("\n") + "\n";
@@ -381,10 +457,14 @@ pub async fn heal_node_with_context(
         }
 
         // 8. Rust unresolved external dependency (E0432)
-        let re_rust_crate_err = Regex::new(r"(?m)error\[E0432\]: unresolved import `(?P<crate>[^`:]+)(?:::.*)?`").unwrap();
+        let re_rust_crate_err =
+            cached_regex!(r"(?m)error\[E0432\]: unresolved import `(?P<crate>[^`:]+)(?:::.*)?`");
         if let Some(caps) = re_rust_crate_err.captures(stderr_str) {
             let crate_name = caps.name("crate").unwrap().as_str().trim();
-            if crate_name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+            if crate_name
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+            {
                 if let Some(ref tx) = logs_tx {
                     let _ = tx.send(format!("  🔧 [HEAL] [Step 2/4: Patching] Diagnosed missing Rust crate dependency: '{}'", crate_name));
                 }
@@ -419,15 +499,22 @@ pub async fn heal_node_with_context(
 
     tokio::time::sleep(tokio::time::Duration::from_millis(80)).await;
     if let Some(ref tx) = logs_tx {
-        let _ = tx.send("  🔧 [HEAL] [Step 2/4: Patching] Synthesizing localized code correction patch".to_string());
-        let _ = tx.send("  🔧 [HEAL]   - Created target patch diff: +\"bun add @thumper/compat-shim\"".to_string());
+        let _ = tx.send(
+            "  🔧 [HEAL] [Step 2/4: Patching] Synthesizing localized code correction patch"
+                .to_string(),
+        );
+        let _ = tx.send(
+            "  🔧 [HEAL]   - Created target patch diff: +\"bun add @thumper/compat-shim\""
+                .to_string(),
+        );
     }
 
     tokio::time::sleep(tokio::time::Duration::from_millis(40)).await;
     if let Some(ref tx) = logs_tx {
         let _ = tx.send("  🔧 [HEAL] [Step 3/4: Verification] Running regression and lockfile integration tests".to_string());
         let _ = tx.send("  🔧 [HEAL]   - Build compiled successfully".to_string());
-        let _ = tx.send("  🔧 [HEAL]   - 14 integration tests passed (Certainty: 100%)".to_string());
+        let _ =
+            tx.send("  🔧 [HEAL]   - 14 integration tests passed (Certainty: 100%)".to_string());
     }
 
     tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
@@ -472,7 +559,9 @@ mod tests {
             Some(compiler_stderr),
             Some(dir.path()),
             Some(tx),
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         assert!(healed);
         let corrected_content = std::fs::read_to_string(&file_path).unwrap();
@@ -482,7 +571,9 @@ mod tests {
         while let Ok(log) = rx.try_recv() {
             logs.push(log);
         }
-        assert!(logs.iter().any(|l| l.contains("Semicolon successfully auto-inserted")));
+        assert!(logs
+            .iter()
+            .any(|l| l.contains("Semicolon successfully auto-inserted")));
     }
 
     #[tokio::test]
@@ -500,7 +591,9 @@ mod tests {
             Some(compiler_stderr),
             Some(dir.path()),
             Some(tx),
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         assert!(healed);
         let corrected_content = std::fs::read_to_string(&file_path).unwrap();
@@ -522,7 +615,9 @@ mod tests {
             Some(compiler_stderr),
             Some(dir.path()),
             Some(tx),
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         assert!(healed);
         let corrected_content = std::fs::read_to_string(&file_path).unwrap();
@@ -534,17 +629,20 @@ mod tests {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("src/main.ts");
         std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
-        std::fs::write(&file_path, "function greet(name) {\n  console.log(name);\n}").unwrap();
+        std::fs::write(
+            &file_path,
+            "function greet(name) {\n  console.log(name);\n}",
+        )
+        .unwrap();
 
-        let compiler_stderr = "src/main.ts(1,16): error TS7006: Parameter 'name' implicitly has an 'any' type.";
+        let compiler_stderr =
+            "src/main.ts(1,16): error TS7006: Parameter 'name' implicitly has an 'any' type.";
         let (tx, mut _rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let healed = heal_node_with_context(
-            "tsc",
-            Some(compiler_stderr),
-            Some(dir.path()),
-            Some(tx),
-        ).await.unwrap();
+        let healed =
+            heal_node_with_context("tsc", Some(compiler_stderr), Some(dir.path()), Some(tx))
+                .await
+                .unwrap();
 
         assert!(healed);
         let corrected_content = std::fs::read_to_string(&file_path).unwrap();
@@ -556,17 +654,20 @@ mod tests {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("src/main.ts");
         std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
-        std::fs::write(&file_path, "import { foo } from './bar';\nconsole.log('hello');").unwrap();
+        std::fs::write(
+            &file_path,
+            "import { foo } from './bar';\nconsole.log('hello');",
+        )
+        .unwrap();
 
-        let compiler_stderr = "src/main.ts(1,10): error TS6192: All imports in import declaration are unused.";
+        let compiler_stderr =
+            "src/main.ts(1,10): error TS6192: All imports in import declaration are unused.";
         let (tx, mut _rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let healed = heal_node_with_context(
-            "tsc",
-            Some(compiler_stderr),
-            Some(dir.path()),
-            Some(tx),
-        ).await.unwrap();
+        let healed =
+            heal_node_with_context("tsc", Some(compiler_stderr), Some(dir.path()), Some(tx))
+                .await
+                .unwrap();
 
         assert!(healed);
         let corrected_content = std::fs::read_to_string(&file_path).unwrap();
@@ -581,13 +682,18 @@ mod tests {
         let file_path = dir.path().join("src/main.ts");
         std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
 
-        let compiler_stderr = "src/main.ts(1,16): error TS7006: Parameter 'name' implicitly has an 'any' type.";
+        let compiler_stderr =
+            "src/main.ts(1,16): error TS7006: Parameter 'name' implicitly has an 'any' type.";
         let (tx, mut _rx) = tokio::sync::mpsc::unbounded_channel();
 
         let mut durations = Vec::new();
         for i in 0..10 {
             // Write fresh target code for each round
-            std::fs::write(&file_path, format!("function greet(name) {{ console.log(name, {}); }}", i)).unwrap();
+            std::fs::write(
+                &file_path,
+                format!("function greet(name) {{ console.log(name, {}); }}", i),
+            )
+            .unwrap();
 
             let start = Instant::now();
             let healed = heal_node_with_context(
@@ -595,7 +701,9 @@ mod tests {
                 Some(compiler_stderr),
                 Some(dir.path()),
                 Some(tx.clone()),
-            ).await.unwrap();
+            )
+            .await
+            .unwrap();
             durations.push(start.elapsed());
 
             assert!(healed);
@@ -607,7 +715,10 @@ mod tests {
 
         println!("  📊 [BENCHMARK] Average local compile-error healing latency: {}ms (across {} iterations)", avg_millis, durations.len());
         // Verify healing is fast (should be sub-10ms since it's local regex/fs write; assert <100ms for safety)
-        assert!(avg_millis < 100.0, "Healing took too long: {}ms", avg_millis);
+        assert!(
+            avg_millis < 100.0,
+            "Healing took too long: {}ms",
+            avg_millis
+        );
     }
 }
-

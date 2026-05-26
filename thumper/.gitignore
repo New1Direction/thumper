@@ -1,7 +1,11 @@
 # Rust
 /target
 **/*.rs.bk
-Cargo.lock
+# Cargo.lock IS tracked — thumper ships a binary (the `thump` CLI), so the
+# lockfile is the only way to get reproducible builds across contributors
+# and CI. Negate the parent ../.gitignore's **/Cargo.lock rule.
+# See: https://doc.rust-lang.org/cargo/faq.html#why-have-cargolock-in-version-control
+!Cargo.lock
 
 # IDE / editors
 .idea/
