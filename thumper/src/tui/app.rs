@@ -24,8 +24,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 use crate::tui::state::{
-    Action, BunLineParse, CompletionContext, CompletionState, GenUpdate, Job, RegistryItem, Toast,
-    get_finishing_tagline, map_native_bun_event_to_stage, parse_bun_native_line,
+    get_finishing_tagline, map_native_bun_event_to_stage, parse_bun_native_line, Action,
+    BunLineParse, CompletionContext, CompletionState, GenUpdate, Job, RegistryItem, Toast,
 };
 use tokio::time::sleep;
 
@@ -535,7 +535,11 @@ impl App {
                 return;
             }
         }
-        self.selected = Some(*vis.last().unwrap());
+        // vis is non-empty (checked above), but pattern-match anyway so a future
+        // refactor that drops that guard can't turn this into a panic.
+        if let Some(&last) = vis.last() {
+            self.selected = Some(last);
+        }
     }
 
     pub(crate) fn spinner(&self) -> &'static str {
@@ -988,7 +992,6 @@ impl App {
         }
     }
 
-
     /// Parse and execute a command typed in the Bun command palette.
     pub(crate) fn execute_bun_command_from_palette(&mut self) {
         let input = self.bun_command_buffer.trim().to_string();
@@ -1353,10 +1356,15 @@ impl App {
             return;
         }
 
-        // Manage completion state
-        if self.completion_state.is_none()
-            || self.completion_state.as_ref().unwrap().context != context
-        {
+        // Manage completion state. Reset if missing or the context changed,
+        // then borrow mutably. The two prior checks separated is_none() from
+        // .as_ref().unwrap() — fine today but a refactor that interleaved
+        // handler dispatch could clear the state between them and crash.
+        let needs_reset = self
+            .completion_state
+            .as_ref()
+            .map_or(true, |s| s.context != context);
+        if needs_reset {
             self.completion_state = Some(CompletionState {
                 matches: filtered.clone(),
                 index: 0,
@@ -1364,8 +1372,10 @@ impl App {
                 context,
             });
         }
-
-        let state = self.completion_state.as_mut().unwrap();
+        let state = self
+            .completion_state
+            .as_mut()
+            .expect("completion_state is Some — set immediately above if it wasn't");
 
         // Cycle
         if reverse {
