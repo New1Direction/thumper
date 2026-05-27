@@ -25,8 +25,8 @@ It is designed to be used from:
 ## Installation (development)
 
 ```bash
-git clone https://github.com/redmicro/api-anything.git
-cd api-anything/thump   # or pip install -e . from the thump/ directory
+git clone https://github.com/New1Direction/thumper.git
+cd thumper/thump   # or pip install -e . from the thump/ directory
 pip install -e .
 ```
 

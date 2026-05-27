@@ -12,10 +12,10 @@ We recently completed a comprehensive audit and refactoring pass on **Thumper** 
 
 - **TUI Monolith Eliminated**  
   The 118 KB `src/tui/app.rs` (≈2,000 lines) was fully modularized into clean, focused modules:  
-  - [src/tui/state.rs](file:///Users/clubpenguin/Documents/API/api-anything/src/tui/state.rs) – app state, `Page` enum, caches  
-  - [src/tui/handlers.rs](file:///Users/clubpenguin/Documents/API/api-anything/src/tui/handlers.rs) – keyboard events and actions  
-  - [src/tui/widgets/views.rs](file:///Users/clubpenguin/Documents/API/api-anything/src/tui/widgets/views.rs) – page rendering (Home, Palette, Absorb, etc.)  
-  - [src/tui/mod.rs](file:///Users/clubpenguin/Documents/API/api-anything/src/tui/mod.rs) – public `App` wrapper with clean event/render API  
+  - [src/tui/state.rs](./src/tui/state.rs) – app state, `Page` enum, caches  
+  - [src/tui/handlers.rs](./src/tui/handlers.rs) – keyboard events and actions  
+  - [src/tui/widgets/views.rs](./src/tui/widgets/views.rs) – page rendering (Home, Palette, Absorb, etc.)  
+  - [src/tui/mod.rs](./src/tui/mod.rs) – public `App` wrapper with clean event/render API  
   The core `app.rs` acts as a tiny compatibility layer. Future UI changes are now fast and safe.
 
 - **Circular Ancestry Delegation Fixed**  
