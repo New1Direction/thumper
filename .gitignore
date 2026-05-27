@@ -34,3 +34,6 @@
 # Environment
 .env
 .env.local
+
+# External project cloned for reference, not part of thumper
+antigravity-awesome-skills/
