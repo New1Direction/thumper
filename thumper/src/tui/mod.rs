@@ -5,12 +5,12 @@
 //! streaming output panel, command palette) will grow inside `app.rs` and submodules.
 
 pub mod app;
+pub mod handlers;
 pub mod job;
 pub mod startup;
+pub mod state;
 pub mod styles;
 pub mod widgets;
-pub mod state;
-pub mod handlers;
 
 pub use state::GenUpdate;
 

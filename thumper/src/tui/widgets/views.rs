@@ -5,9 +5,9 @@ use crate::tui::styles;
 use crate::tui::widgets::error_card::render_diagnostic_error_card;
 use crate::tui::widgets::plasma_bar::{render_braille_plasma_bar, render_recursive_fractal_core};
 use chrono::Utc;
+use ratatui::layout::Alignment;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap};
-use ratatui::layout::Alignment;
 use std::time::Instant;
 
 /// Render the Bun command palette line 1 (input buffer with cursor) and line 2 (live hint or transient error).
@@ -149,16 +149,14 @@ pub fn render_bun_command_palette(app: &App, f: &mut Frame, area: Rect) {
         )
     } else if !app.bun_command_buffer.trim().is_empty() {
         let cmd = app.bun_command_buffer.trim();
-        let icon = if cmd.starts_with("add")
-            || cmd.starts_with("install")
-            || cmd.starts_with("remove")
-        {
-            "📦 "
-        } else if cmd.starts_with("run") || cmd.starts_with("script") {
-            "🚀 "
-        } else {
-            "🐰 "
-        };
+        let icon =
+            if cmd.starts_with("add") || cmd.starts_with("install") || cmd.starts_with("remove") {
+                "📦 "
+            } else if cmd.starts_with("run") || cmd.starts_with("script") {
+                "🚀 "
+            } else {
+                "🐰 "
+            };
         let preview = format!("{}  {}  ·  native fast path", icon, cmd);
         (preview, help_style)
     } else {
@@ -227,8 +225,8 @@ pub fn render_app(app: &App, f: &mut Frame) {
 
     // Build the metric ribbon (tiny live meter using velocity + performance)
     let metric_ribbon: String = if let Some(job) = live_metric {
-        let vel = job.bun_package_count as f32 / 20.0
-            + if job.status == "running" { 0.3 } else { 0.0 };
+        let vel =
+            job.bun_package_count as f32 / 20.0 + if job.status == "running" { 0.3 } else { 0.0 };
         let perf = job.performance_score.unwrap_or(60.0) / 100.0;
         let energy = ((vel + perf) / 2.0).clamp(0.1, 0.95);
 
@@ -350,7 +348,10 @@ pub fn render_app(app: &App, f: &mut Frame) {
     f.render_widget(preview, body_chunks[1]);
 
     // Jobs / Activity panel (live streamed progress, status, paths)
-    let has_speculative = app.jobs.iter().any(|j| j.tool.starts_with("speculative:") && j.status == "running");
+    let has_speculative = app
+        .jobs
+        .iter()
+        .any(|j| j.tool.starts_with("speculative:") && j.status == "running");
     let limit = if has_speculative { 1 } else { 6 };
     let job_vis: Vec<_> = app.jobs.iter().rev().take(limit).collect();
     let job_items: Vec<ListItem> = job_vis
@@ -531,8 +532,7 @@ pub fn render_app(app: &App, f: &mut Frame) {
                                 }
                             }
                         },
-                        start_time: std::time::Instant::now()
-                            - std::time::Duration::from_secs(1),
+                        start_time: std::time::Instant::now() - std::time::Duration::from_secs(1),
                         elapsed: std::time::Duration::from_millis((job.pct as u64) * 10),
                         progress: (job.pct as f32) / 100.0,
                         velocity: {
@@ -604,78 +604,186 @@ pub fn render_app(app: &App, f: &mut Frame) {
                         _ => Color::Gray,
                     };
                     let elapsed_time = &job.started;
-                    
+
                     nodes_lines.push(Line::from(vec![
                         Span::raw(format!("{} ⚡ ", sp)),
-                        Span::styled("Speculative Security DAG", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                        Span::styled(format!(" [{}] ", job.status.to_uppercase()), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+                        Span::styled(
+                            "Speculative Security DAG",
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!(" [{}] ", job.status.to_uppercase()),
+                            Style::default()
+                                .fg(status_color)
+                                .add_modifier(Modifier::BOLD),
+                        ),
                         Span::raw(format!("{} (Started: {})", pct_str, elapsed_time)),
                     ]));
 
                     let msg = job.message.as_str();
-                    
-                    let n1_status = if (msg.contains("Secret Scan") && msg.contains("complete")) || job.pct > 25 {
+
+                    let n1_status = if (msg.contains("Secret Scan") && msg.contains("complete"))
+                        || job.pct > 25
+                    {
                         ("✓", "Secret Scan", "Low Risk", Color::Green)
-                    } else if msg.contains("Starting step: Secret Scan") || (job.pct > 5 && job.pct <= 25) {
+                    } else if msg.contains("Starting step: Secret Scan")
+                        || (job.pct > 5 && job.pct <= 25)
+                    {
                         ("→", "Secret Scan", "Scanning secrets...", Color::Yellow)
                     } else {
                         (" ", "Secret Scan", "Pending", Color::DarkGray)
                     };
 
-                    let n2_status = if (msg.contains("Dependency Audit") && msg.contains("complete")) || job.pct > 35 {
+                    let n2_status = if (msg.contains("Dependency Audit")
+                        && msg.contains("complete"))
+                        || job.pct > 35
+                    {
                         ("✓", "Dependency Audit", "Medium Risk", Color::Green)
-                    } else if msg.contains("Starting step: Dependency Audit") || (job.pct > 5 && job.pct <= 35) {
-                        ("→", "Dependency Audit", "Auditing dependencies...", Color::Yellow)
+                    } else if msg.contains("Starting step: Dependency Audit")
+                        || (job.pct > 5 && job.pct <= 35)
+                    {
+                        (
+                            "→",
+                            "Dependency Audit",
+                            "Auditing dependencies...",
+                            Color::Yellow,
+                        )
                     } else {
                         (" ", "Dependency Audit", "Pending", Color::DarkGray)
                     };
 
-                    let n3_status = if msg.contains("Healed step successfully: CI Integrity") || msg.contains("Step complete: CI Integrity") || job.pct > 75 {
-                        ("✓", "CI Integrity", "Self-Healed via Sandbox Patch", Color::Green)
-                    } else if msg.contains("self-healing") || msg.contains("HEAL") || (job.pct > 40 && job.pct <= 75) {
-                        ("🔧", "CI Integrity", "Self-Healing (Step 3/4: Verification)", Color::Magenta)
+                    let n3_status = if msg.contains("Healed step successfully: CI Integrity")
+                        || msg.contains("Step complete: CI Integrity")
+                        || job.pct > 75
+                    {
+                        (
+                            "✓",
+                            "CI Integrity",
+                            "Self-Healed via Sandbox Patch",
+                            Color::Green,
+                        )
+                    } else if msg.contains("self-healing")
+                        || msg.contains("HEAL")
+                        || (job.pct > 40 && job.pct <= 75)
+                    {
+                        (
+                            "🔧",
+                            "CI Integrity",
+                            "Self-Healing (Step 3/4: Verification)",
+                            Color::Magenta,
+                        )
                     } else if msg.contains("Starting step: CI Integrity") {
-                        ("→", "CI Integrity", "Running CI integrity...", Color::Yellow)
+                        (
+                            "→",
+                            "CI Integrity",
+                            "Running CI integrity...",
+                            Color::Yellow,
+                        )
                     } else {
                         (" ", "CI Integrity", "Pending", Color::DarkGray)
                     };
 
-                    let n4_status = if (msg.contains("Deployment Gate") && msg.contains("complete")) || job.pct >= 95 {
-                        ("✓", "Deployment Gate", "Zero-Downtime Complete", Color::Green)
-                    } else if msg.contains("Starting step: Deployment Gate") || (job.pct > 75 && job.pct < 95) {
-                        ("→", "Deployment Gate", "Zero-Downtime Deployment Gate...", Color::Yellow)
+                    let n4_status = if (msg.contains("Deployment Gate") && msg.contains("complete"))
+                        || job.pct >= 95
+                    {
+                        (
+                            "✓",
+                            "Deployment Gate",
+                            "Zero-Downtime Complete",
+                            Color::Green,
+                        )
+                    } else if msg.contains("Starting step: Deployment Gate")
+                        || (job.pct > 75 && job.pct < 95)
+                    {
+                        (
+                            "→",
+                            "Deployment Gate",
+                            "Zero-Downtime Deployment Gate...",
+                            Color::Yellow,
+                        )
                     } else {
                         (" ", "Deployment Gate", "Pending", Color::DarkGray)
                     };
 
-                    let render_node = |symbol: &str, name: &str, desc: &str, color: Color, is_last: bool| {
-                        let prefix = if is_last { "└─ " } else { "├─ " };
-                        let status_span = match symbol {
-                            "✓" => Span::styled("[✓]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-                            "→" => Span::styled("[→]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                            "🔧" => Span::styled("[🔧]", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
-                            "!" => Span::styled("[!]", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-                            _ => Span::styled("[ ]", Style::default().fg(Color::DarkGray)),
+                    let render_node =
+                        |symbol: &str, name: &str, desc: &str, color: Color, is_last: bool| {
+                            let prefix = if is_last { "└─ " } else { "├─ " };
+                            let status_span = match symbol {
+                                "✓" => Span::styled(
+                                    "[✓]",
+                                    Style::default()
+                                        .fg(Color::Green)
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                                "→" => Span::styled(
+                                    "[→]",
+                                    Style::default()
+                                        .fg(Color::Yellow)
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                                "🔧" => Span::styled(
+                                    "[🔧]",
+                                    Style::default()
+                                        .fg(Color::Magenta)
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                                "!" => Span::styled(
+                                    "[!]",
+                                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                                ),
+                                _ => Span::styled("[ ]", Style::default().fg(Color::DarkGray)),
+                            };
+                            Line::from(vec![
+                                Span::raw("   "),
+                                Span::raw(prefix),
+                                status_span,
+                                Span::raw(" "),
+                                Span::styled(
+                                    format!("{:<18}", name),
+                                    Style::default().fg(Color::White),
+                                ),
+                                Span::styled(format!(" ({})", desc), Style::default().fg(color)),
+                            ])
                         };
-                        Line::from(vec![
-                            Span::raw("   "),
-                            Span::raw(prefix),
-                            status_span,
-                            Span::raw(" "),
-                            Span::styled(format!("{:<18}", name), Style::default().fg(Color::White)),
-                            Span::styled(format!(" ({})", desc), Style::default().fg(color)),
-                        ])
-                    };
 
-                    nodes_lines.push(render_node(n1_status.0, n1_status.1, n1_status.2, n1_status.3, false));
-                    nodes_lines.push(render_node(n2_status.0, n2_status.1, n2_status.2, n2_status.3, false));
-                    nodes_lines.push(render_node(n3_status.0, n3_status.1, n3_status.2, n3_status.3, false));
-                    nodes_lines.push(render_node(n4_status.0, n4_status.1, n4_status.2, n4_status.3, true));
+                    nodes_lines.push(render_node(
+                        n1_status.0,
+                        n1_status.1,
+                        n1_status.2,
+                        n1_status.3,
+                        false,
+                    ));
+                    nodes_lines.push(render_node(
+                        n2_status.0,
+                        n2_status.1,
+                        n2_status.2,
+                        n2_status.3,
+                        false,
+                    ));
+                    nodes_lines.push(render_node(
+                        n3_status.0,
+                        n3_status.1,
+                        n3_status.2,
+                        n3_status.3,
+                        false,
+                    ));
+                    nodes_lines.push(render_node(
+                        n4_status.0,
+                        n4_status.1,
+                        n4_status.2,
+                        n4_status.3,
+                        true,
+                    ));
 
                     nodes_lines.push(Line::from(vec![
                         Span::raw("   "),
                         Span::styled("Log: ", Style::default().fg(Color::DarkGray)),
-                        Span::styled(job.message.clone(), Style::default().fg(Color::Gray).add_modifier(Modifier::DIM)),
+                        Span::styled(
+                            job.message.clone(),
+                            Style::default().fg(Color::Gray).add_modifier(Modifier::DIM),
+                        ),
                     ]));
 
                     nodes_lines

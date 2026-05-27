@@ -2,15 +2,15 @@
 //! Maintains warm, pre-initialized sandboxes with pre-mounted toolchains, symlinked caches,
 //! warm LSP servers, and incremental compiler daemons.
 
+use anyhow::{anyhow, Result};
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::Mutex;
-use tokio::process::{Command, Child};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use anyhow::{anyhow, Result};
+use tokio::process::{Child, Command};
+use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -41,17 +41,23 @@ impl Sandbox {
         };
 
         let mut child = lsp_proc.lock().await;
-        
+
         {
-            let stdin = child.stdin.as_mut().ok_or_else(|| anyhow!("LSP stdin not available"))?;
+            let stdin = child
+                .stdin
+                .as_mut()
+                .ok_or_else(|| anyhow!("LSP stdin not available"))?;
             // Write standard LSP Content-Length header and request
             let payload = format!("Content-Length: {}\r\n\r\n{}\n", request.len(), request);
             stdin.write_all(payload.as_bytes()).await?;
             stdin.flush().await?;
         }
 
-        let stdout = child.stdout.as_mut().ok_or_else(|| anyhow!("LSP stdout not available"))?;
-        
+        let stdout = child
+            .stdout
+            .as_mut()
+            .ok_or_else(|| anyhow!("LSP stdout not available"))?;
+
         // Read the response from warm stdout
         let mut reader = BufReader::new(stdout);
         let mut line = String::new();
@@ -77,7 +83,7 @@ impl Sandbox {
 
         let mut buf = vec![0u8; content_length];
         reader.read_exact(&mut buf).await?;
-        
+
         Ok(String::from_utf8(buf)?)
     }
 
@@ -157,7 +163,7 @@ impl SandboxPool {
         let node_modules_dir = path.join("node_modules");
         let shared_node_modules = self.shared_cache_path.join("node_modules");
         fs::create_dir_all(&shared_node_modules).ok();
-        
+
         // Symlink package cache to guarantee zero network latency on first package access
         #[cfg(unix)]
         {
@@ -184,7 +190,11 @@ impl SandboxPool {
             Err(_) => None,
         };
 
-        info!("  🔧 [POOL] Sandbox '{}' pre-warmed successfully in {}ms", id, start.elapsed().as_millis());
+        info!(
+            "  🔧 [POOL] Sandbox '{}' pre-warmed successfully in {}ms",
+            id,
+            start.elapsed().as_millis()
+        );
 
         Ok(Sandbox {
             id,
@@ -254,7 +264,8 @@ impl SandboxPool {
             cmd.arg("/C").arg("echo Compiler Watch Active");
         } else {
             // Emulate a hot tsc --watch incremental compile daemon
-            cmd.arg("-e").arg("console.log('Compiler daemon pre-warmed.'); setInterval(() => {}, 5000);");
+            cmd.arg("-e")
+                .arg("console.log('Compiler daemon pre-warmed.'); setInterval(() => {}, 5000);");
         }
 
         let child = cmd.spawn()?;
@@ -264,7 +275,7 @@ impl SandboxPool {
     /// Instantly acquire a pre-warmed sandbox from the pool, asynchronously spawning a replacement sandbox.
     pub async fn acquire(&self) -> Result<Sandbox> {
         let mut queue = self.active_sandboxes.lock().await;
-        
+
         let mut sandbox = match queue.pop_front() {
             Some(sb) => sb,
             None => {
@@ -275,7 +286,7 @@ impl SandboxPool {
         };
 
         sandbox.status = SandboxStatus::Acquired;
-        
+
         // Spawn asynchronous rolling background replenishment to keep the pool constant
         let active_clone = self.active_sandboxes.clone();
         let pool_dir_clone = self.pool_dir.clone();
@@ -300,7 +311,10 @@ impl SandboxPool {
         sandbox.shutdown().await;
         // Clean up sandbox path to keep physical directory clean
         fs::remove_dir_all(&sandbox.path).ok();
-        info!("  🔧 [POOL] Sandbox '{}' safely released and recycled", sandbox.id);
+        info!(
+            "  🔧 [POOL] Sandbox '{}' safely released and recycled",
+            sandbox.id
+        );
     }
 }
 
@@ -359,7 +373,7 @@ mod tests {
         // Send a mock LSP initialize JSON-RPC message
         let request = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#;
         let response = sandbox.query_lsp(request).await.unwrap();
-        
+
         assert!(response.contains("jsonrpc"));
         assert!(response.contains("capabilities"));
         assert!(response.contains("hoverProvider"));
@@ -378,7 +392,7 @@ mod tests {
             let start = Instant::now();
             let sandbox = pool.acquire().await.unwrap();
             durations.push(start.elapsed());
-            
+
             // Release immediately to keep things clean
             pool.release(sandbox).await;
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -387,9 +401,13 @@ mod tests {
         let total_micros: u128 = durations.iter().map(|d| d.as_micros()).sum();
         let avg_micros = total_micros / durations.len() as u128;
         let avg_millis = avg_micros as f64 / 1000.0;
-        
+
         println!("  📊 [BENCHMARK] Average sandbox pool acquisition latency: {}ms (across {} iterations)", avg_millis, durations.len());
         // Verify acquisition is very fast (should easily be sub-10ms, but let's assert <50ms for extremely conservative CI safety)
-        assert!(avg_millis < 50.0, "Acquisition took too long: {}ms", avg_millis);
+        assert!(
+            avg_millis < 50.0,
+            "Acquisition took too long: {}ms",
+            avg_millis
+        );
     }
 }

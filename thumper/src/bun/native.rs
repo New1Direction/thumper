@@ -163,9 +163,9 @@ async fn spawn_bun_exercises_native_path_when_bun_present() {
 use crate::bun::events::{BunEvent, BunEventOrOutcome, BunOutcome, EventLevel};
 use crate::bun::harness::{BunCommand, BunInvocation, BunStream};
 use chrono::Utc;
+use std::collections::VecDeque;
 use std::process::Stdio;
 use std::sync::Arc;
-use std::collections::VecDeque;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex};
@@ -302,14 +302,30 @@ pub async fn spawn_bun_native(inv: BunInvocation) -> Result<BunStream> {
     let parser_stdout = parser.clone();
     let log_buffer_stdout = log_buffer.clone();
     tokio::spawn(async move {
-        let _ = pump_lines(stdout, &tx_stdout, verb_for_task, "stdout", Some(parser_stdout), log_buffer_stdout).await;
+        let _ = pump_lines(
+            stdout,
+            &tx_stdout,
+            verb_for_task,
+            "stdout",
+            Some(parser_stdout),
+            log_buffer_stdout,
+        )
+        .await;
     });
 
     let tx_stderr = tx.clone();
     let parser_stderr = parser;
     let log_buffer_stderr = log_buffer;
     tokio::spawn(async move {
-        let _ = pump_lines(stderr, &tx_stderr, verb_for_task, "stderr", Some(parser_stderr), log_buffer_stderr).await;
+        let _ = pump_lines(
+            stderr,
+            &tx_stderr,
+            verb_for_task,
+            "stderr",
+            Some(parser_stderr),
+            log_buffer_stderr,
+        )
+        .await;
     });
 
     // Dedicated waiter task that gets the *real* exit code

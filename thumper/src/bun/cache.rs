@@ -1,7 +1,7 @@
 //! Subgraph Chain Caching & Deterministic Replay module.
 //! Optimizes compilation times and replays past telemetries with absolute timing consistency.
 
-use crate::registry::sqlite::{read_cache, write_cache, get_execution, SqliteExecution};
+use crate::registry::sqlite::{get_execution, read_cache, write_cache, SqliteExecution};
 use anyhow::{anyhow, Result};
 use std::time::Instant;
 
@@ -36,13 +36,22 @@ pub struct DeterministicReplay;
 
 impl DeterministicReplay {
     /// Replay an execution session from the database in real time.
-    pub async fn replay_session(id: &str, logs_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>) -> Result<SqliteExecution> {
+    pub async fn replay_session(
+        id: &str,
+        logs_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    ) -> Result<SqliteExecution> {
         let exec = get_execution(id)?
             .ok_or_else(|| anyhow!("Execution trace with ID '{}' not found in database", id))?;
 
         if let Some(ref tx) = logs_tx {
-            let _ = tx.send(format!("🎥 [REPLAY] Starting deterministic playback of session: {}", id));
-            let _ = tx.send(format!("🎥 [REPLAY] Command original intent: '{}'", exec.command));
+            let _ = tx.send(format!(
+                "🎥 [REPLAY] Starting deterministic playback of session: {}",
+                id
+            ));
+            let _ = tx.send(format!(
+                "🎥 [REPLAY] Command original intent: '{}'",
+                exec.command
+            ));
             let _ = tx.send("🎥 [REPLAY] Pacing logs chronologically...".to_string());
         }
 
@@ -60,7 +69,10 @@ impl DeterministicReplay {
         }
 
         if let Some(ref tx) = logs_tx {
-            let _ = tx.send(format!("🎥 [REPLAY] Playback complete. Final reported status: {}", exec.status));
+            let _ = tx.send(format!(
+                "🎥 [REPLAY] Playback complete. Final reported status: {}",
+                exec.status
+            ));
         }
 
         Ok(exec)
@@ -112,7 +124,9 @@ mod tests {
         insert_execution(&test_exec).unwrap();
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let replayed = DeterministicReplay::replay_session("replay_test_id_999", Some(tx)).await.unwrap();
+        let replayed = DeterministicReplay::replay_session("replay_test_id_999", Some(tx))
+            .await
+            .unwrap();
         assert_eq!(replayed.id, "replay_test_id_999");
         assert_eq!(replayed.status, "done");
 
@@ -124,4 +138,3 @@ mod tests {
         assert!(replay_logs.iter().any(|l| l.contains("Log line 1")));
     }
 }
-

@@ -71,7 +71,9 @@ fn redmicro_root() -> PathBuf {
     candidates.push(PathBuf::from("/opt/redmicro"));
 
     for p in &candidates {
-        if p.join("supporting-tools/api-harness/api_wrapper_generator.py").exists() {
+        if p.join("supporting-tools/api-harness/api_wrapper_generator.py")
+            .exists()
+        {
             return p.clone();
         }
     }
@@ -82,7 +84,8 @@ fn redmicro_root() -> PathBuf {
 
 fn redmicro_available() -> bool {
     let root = redmicro_root();
-    root.join("supporting-tools/api-harness/api_wrapper_generator.py").exists()
+    root.join("supporting-tools/api-harness/api_wrapper_generator.py")
+        .exists()
 }
 
 // ---------------------------------------------------------------------------

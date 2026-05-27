@@ -100,7 +100,9 @@ pub async fn heal_node_with_context(
         }
 
         // 2. Diagnose and heal unused variable warning as error
-        let re_unused_var = cached_regex!(r"(?m)error: unused variable:\s*`(?P<var>[^`]+)`[\s\S]*?-->\s*(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)");
+        let re_unused_var = cached_regex!(
+            r"(?m)error: unused variable:\s*`(?P<var>[^`]+)`[\s\S]*?-->\s*(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)"
+        );
         if let Some(caps) = re_unused_var.captures(stderr_str) {
             let file_rel = caps.name("file").unwrap().as_str().trim();
             let line_num: usize = caps.name("line").unwrap().as_str().parse().unwrap_or(0);
@@ -150,7 +152,9 @@ pub async fn heal_node_with_context(
         }
 
         // 3. Diagnose and heal unused import warning as error
-        let re_unused_import = cached_regex!(r"(?m)error: unused import:\s*`(?P<imp>[^`]+)`[\s\S]*?-->\s*(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)");
+        let re_unused_import = cached_regex!(
+            r"(?m)error: unused import:\s*`(?P<imp>[^`]+)`[\s\S]*?-->\s*(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)"
+        );
         if let Some(caps) = re_unused_import.captures(stderr_str) {
             let file_rel = caps.name("file").unwrap().as_str().trim();
             let line_num: usize = caps.name("line").unwrap().as_str().parse().unwrap_or(0);
@@ -236,7 +240,9 @@ pub async fn heal_node_with_context(
         // Check for TypeScript/node/bun style error
         let re_node_const = cached_regex!(r"(?i)Assignment to constant variable");
         let re_at_file = cached_regex!(r"(?m)at\s+(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)");
-        let re_ts_const = cached_regex!(r"(?m)^(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)\s+-\s+error TS2588: Cannot assign to '(?P<var>[^']+)'");
+        let re_ts_const = cached_regex!(
+            r"(?m)^(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)\s+-\s+error TS2588: Cannot assign to '(?P<var>[^']+)'"
+        );
 
         let mut matched_const = false;
         let mut file_rel = "";
@@ -314,7 +320,9 @@ pub async fn heal_node_with_context(
         }
 
         // 6. TS7006 Parameter Implicit 'any' Type Parameter Healing
-        let re_ts_any_err = cached_regex!(r"(?m)(?:error TS7006: Parameter '(?P<param1>[^']+)' implicitly has an 'any' type.*-->\s*(?P<file1>[^\n:]+):(?P<line1>\d+):(?P<col1>\d+)|(?P<file2>[^\n:]+)\((?P<line2>\d+),(?P<col2>\d+)\): error TS7006: Parameter '(?P<param2>[^']+)' implicitly has an 'any' type)");
+        let re_ts_any_err = cached_regex!(
+            r"(?m)(?:error TS7006: Parameter '(?P<param1>[^']+)' implicitly has an 'any' type.*-->\s*(?P<file1>[^\n:]+):(?P<line1>\d+):(?P<col1>\d+)|(?P<file2>[^\n:]+)\((?P<line2>\d+),(?P<col2>\d+)\): error TS7006: Parameter '(?P<param2>[^']+)' implicitly has an 'any' type)"
+        );
         if let Some(caps) = re_ts_any_err.captures(stderr_str) {
             let file_rel = caps
                 .name("file1")
@@ -378,10 +386,18 @@ pub async fn heal_node_with_context(
         }
 
         // 7. TS6133/6192/6196 Unused Local/Import/Variable Suppression Healing (TS/JS)
-        let re_paren = cached_regex!(r"(?m)^(?P<file>[^\n:]+)\((?P<line>\d+),(?P<col>\d+)\):\s+error TS(?P<code>6133|6192|6196)");
-        let re_colon_dash = cached_regex!(r"(?m)^(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)\s+-\s+error TS(?P<code>6133|6192|6196)");
-        let re_colon = cached_regex!(r"(?m)^(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+):\s+error TS(?P<code>6133|6192|6196)");
-        let re_multiline = cached_regex!(r"(?m)error TS(?P<code>6133|6192|6196):[\s\S]*?-->\s*(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)");
+        let re_paren = cached_regex!(
+            r"(?m)^(?P<file>[^\n:]+)\((?P<line>\d+),(?P<col>\d+)\):\s+error TS(?P<code>6133|6192|6196)"
+        );
+        let re_colon_dash = cached_regex!(
+            r"(?m)^(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)\s+-\s+error TS(?P<code>6133|6192|6196)"
+        );
+        let re_colon = cached_regex!(
+            r"(?m)^(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+):\s+error TS(?P<code>6133|6192|6196)"
+        );
+        let re_multiline = cached_regex!(
+            r"(?m)error TS(?P<code>6133|6192|6196):[\s\S]*?-->\s*(?P<file>[^\n:]+):(?P<line>\d+):(?P<col>\d+)"
+        );
 
         let mut matched = false;
         let mut file_rel = "";

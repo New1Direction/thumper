@@ -3,8 +3,8 @@
 
 use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection};
-use std::path::{Path, PathBuf};
 use std::cell::RefCell;
+use std::path::{Path, PathBuf};
 
 thread_local! {
     static TEST_DB_PATH: RefCell<Option<PathBuf>> = RefCell::new(None);
@@ -27,7 +27,6 @@ fn db_path() -> PathBuf {
         }
     })
 }
-
 
 fn legacy_json_path() -> PathBuf {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -101,10 +100,19 @@ pub fn init_db() -> Result<()> {
             if let Ok(data) = serde_json::from_str::<serde_json::Value>(&content) {
                 if let Some(tools) = data.get("tools").and_then(|t| t.as_array()) {
                     for tool in tools {
-                        let name = tool.get("name").and_then(|n| n.as_str()).unwrap_or_default();
-                        let kind = tool.get("kind").and_then(|k| k.as_str()).unwrap_or_default();
-                        let output_dir = tool.get("output_dir").and_then(|o| o.as_str()).unwrap_or_default();
-                        
+                        let name = tool
+                            .get("name")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or_default();
+                        let kind = tool
+                            .get("kind")
+                            .and_then(|k| k.as_str())
+                            .unwrap_or_default();
+                        let output_dir = tool
+                            .get("output_dir")
+                            .and_then(|o| o.as_str())
+                            .unwrap_or_default();
+
                         let mut artifacts = Vec::new();
                         if let Some(arr) = tool.get("artifacts").and_then(|a| a.as_array()) {
                             for val in arr {
@@ -113,10 +121,17 @@ pub fn init_db() -> Result<()> {
                                 }
                             }
                         }
-                        let artifacts_json = serde_json::to_string(&artifacts).unwrap_or_else(|_| "[]".to_string());
-                        
-                        let absorbed = tool.get("absorbed").and_then(|a| a.as_bool()).unwrap_or(false);
-                        let last_gen = tool.get("last_generated").and_then(|l| l.as_str()).unwrap_or_default();
+                        let artifacts_json =
+                            serde_json::to_string(&artifacts).unwrap_or_else(|_| "[]".to_string());
+
+                        let absorbed = tool
+                            .get("absorbed")
+                            .and_then(|a| a.as_bool())
+                            .unwrap_or(false);
+                        let last_gen = tool
+                            .get("last_generated")
+                            .and_then(|l| l.as_str())
+                            .unwrap_or_default();
 
                         if !name.is_empty() {
                             let _ = conn.execute(
@@ -158,7 +173,9 @@ pub struct SqliteTool {
 /// Retrieve all tools from the SQLite registry.
 pub fn load_tools() -> Result<Vec<SqliteTool>> {
     let conn = Connection::open(db_path())?;
-    let mut stmt = conn.prepare("SELECT name, kind, output_dir, artifacts, absorbed, last_generated FROM registry")?;
+    let mut stmt = conn.prepare(
+        "SELECT name, kind, output_dir, artifacts, absorbed, last_generated FROM registry",
+    )?;
     let tool_iter = stmt.query_map([], |row| {
         let artifacts_json: String = row.get(3)?;
         let artifacts: Vec<String> = serde_json::from_str(&artifacts_json).unwrap_or_default();
@@ -344,7 +361,14 @@ mod tests {
 
         // 1. Tool Caching & Retrieval
         let test_tool_name = "test_tool_999";
-        save_tool(test_tool_name, "test_kind", "/test/path", &["test_art".to_string()], true).unwrap();
+        save_tool(
+            test_tool_name,
+            "test_kind",
+            "/test/path",
+            &["test_art".to_string()],
+            true,
+        )
+        .unwrap();
 
         let tools = load_tools().unwrap();
         let found = tools.iter().find(|t| t.name == test_tool_name).unwrap();
@@ -382,7 +406,14 @@ mod tests {
         assert_eq!(loaded.signature, Some("sig_val_abc".to_string()));
 
         // Update the execution
-        update_execution("exec_test_id_123", "completed", 100.0, "Starting test...\nSuccess!\n", Some("2026-05-21T00:01:00Z".to_string())).unwrap();
+        update_execution(
+            "exec_test_id_123",
+            "completed",
+            100.0,
+            "Starting test...\nSuccess!\n",
+            Some("2026-05-21T00:01:00Z".to_string()),
+        )
+        .unwrap();
 
         let updated = get_execution("exec_test_id_123").unwrap().unwrap();
         assert_eq!(updated.status, "completed");
@@ -398,4 +429,3 @@ mod tests {
         assert_eq!(cached_val, "cached_result_data");
     }
 }
-

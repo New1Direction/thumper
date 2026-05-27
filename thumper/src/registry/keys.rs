@@ -1,9 +1,9 @@
 //! Cryptographic node keypair management for provenance and verifiable execution signatures.
 
 use anyhow::{anyhow, Result};
-use ed25519_dalek::{SigningKey, VerifyingKey, Signature, Signer, Verifier};
-use std::path::PathBuf;
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use std::fs;
+use std::path::PathBuf;
 
 fn key_path() -> PathBuf {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -40,24 +40,25 @@ pub fn sign_data(data: &[u8]) -> Result<(String, String)> {
     let key = init_node_key()?;
     let sig = key.sign(data);
     let pubkey = key.verifying_key();
-    
-    Ok((
-        hex::encode(pubkey.to_bytes()),
-        hex::encode(sig.to_bytes()),
-    ))
+
+    Ok((hex::encode(pubkey.to_bytes()), hex::encode(sig.to_bytes())))
 }
 
 /// Verify that a hexadecimal Ed25519 signature is valid for a given block of data and public key.
 pub fn verify_data(pubkey_hex: &str, data: &[u8], sig_hex: &str) -> Result<bool> {
     let pubkey_bytes = hex::decode(pubkey_hex)?;
     let sig_bytes = hex::decode(sig_hex)?;
-    
-    let pubkey_arr: [u8; 32] = pubkey_bytes.try_into().map_err(|_| anyhow!("Invalid pubkey length"))?;
-    let sig_arr: [u8; 64] = sig_bytes.try_into().map_err(|_| anyhow!("Invalid signature length"))?;
-    
+
+    let pubkey_arr: [u8; 32] = pubkey_bytes
+        .try_into()
+        .map_err(|_| anyhow!("Invalid pubkey length"))?;
+    let sig_arr: [u8; 64] = sig_bytes
+        .try_into()
+        .map_err(|_| anyhow!("Invalid signature length"))?;
+
     let pubkey = VerifyingKey::from_bytes(&pubkey_arr)?;
     let sig = Signature::from_bytes(&sig_arr);
-    
+
     Ok(pubkey.verify(data, &sig).is_ok())
 }
 
@@ -69,7 +70,7 @@ mod tests {
     fn test_node_key_signing_and_verification() {
         let temp_dir = tempfile::tempdir().unwrap();
         let key_file = temp_dir.path().join("node_key.bin");
-        
+
         // Override path during tests
         let signing_key = {
             let mut rng = rand::thread_rng();

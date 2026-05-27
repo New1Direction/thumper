@@ -75,18 +75,14 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<Action> {
                 app.status_message = format!("Bun: {}", app.bun_command_buffer);
                 return None;
             }
-            KeyCode::Home | KeyCode::Char('a')
-                if key.modifiers.contains(KeyModifiers::CONTROL) =>
-            {
+            KeyCode::Home | KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 app.bun_history_index = None;
                 app.bun_cursor_index = 0;
                 app.completion_state = None;
                 app.status_message = format!("Bun: {}", app.bun_command_buffer);
                 return None;
             }
-            KeyCode::End | KeyCode::Char('e')
-                if key.modifiers.contains(KeyModifiers::CONTROL) =>
-            {
+            KeyCode::End | KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 app.bun_history_index = None;
                 app.bun_cursor_index = app.bun_command_buffer.len();
                 app.completion_state = None;
@@ -196,10 +192,7 @@ pub fn handle_action(app: &mut App, action: Action) {
             app.status_message = if app.filter.is_empty() {
                 "Filter cleared".to_string()
             } else {
-                format!(
-                    "Filter active: {} items shown",
-                    app.visible_indices().len()
-                )
+                format!("Filter active: {} items shown", app.visible_indices().len())
             };
         }
         Action::OpenDirForSelected => {
@@ -252,8 +245,7 @@ pub fn handle_action(app: &mut App, action: Action) {
                             .any(|t| t.contains("web") || t.contains("framework"))
                     {
                         app.bun_command_buffer = format!("add {}", name);
-                    } else if kind.contains("cli")
-                        || tags.iter().any(|t| t == "cli" || t == "tool")
+                    } else if kind.contains("cli") || tags.iter().any(|t| t == "cli" || t == "tool")
                     {
                         app.bun_command_buffer = format!("add {} --dev", name);
                     } else {

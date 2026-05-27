@@ -57,22 +57,22 @@ impl ExecutionDag {
     /// Calculate the cryptographic Merkle DAG root hash of the execution.
     /// Hashing each node's inputs, outputs, and parent dependency hashes.
     pub fn compute_merkle_root(&self) -> String {
-        use sha2::{Sha256, Digest};
-        
+        use sha2::{Digest, Sha256};
+
         let mut node_hashes: HashMap<String, String> = HashMap::new();
-        
+
         // Compile to get levels or topologically sort to process parent hashes first.
         if let Ok(levels) = self.compile() {
             for level in levels {
                 for node_id in level {
                     if let Some(node) = self.nodes.get(&node_id) {
                         let mut hasher = Sha256::new();
-                        
+
                         // Hash inputs
                         hasher.update(node.id.as_bytes());
                         hasher.update(node.name.as_bytes());
                         hasher.update(node.command.as_bytes());
-                        
+
                         // Hash outputs/telemetry
                         let status_str = format!("{:?}", node.status);
                         hasher.update(status_str.as_bytes());
@@ -82,21 +82,21 @@ impl ExecutionDag {
                         hasher.update(node.risk.as_bytes());
                         hasher.update(node.severity.as_bytes());
                         hasher.update(node.blast_radius.as_bytes());
-                        
+
                         // Hash direct dependencies' computed hashes (Parent Hash chaining)
                         for dep_id in &node.dependencies {
                             if let Some(parent_hash) = node_hashes.get(dep_id) {
                                 hasher.update(parent_hash.as_bytes());
                             }
                         }
-                        
+
                         let hash_result = hex::encode(hasher.finalize());
                         node_hashes.insert(node_id, hash_result);
                     }
                 }
             }
         }
-        
+
         // If node_hashes is empty, we return a hash of the intent and ID.
         if node_hashes.is_empty() {
             let mut hasher = Sha256::new();
@@ -104,16 +104,16 @@ impl ExecutionDag {
             hasher.update(self.intent.as_bytes());
             return hex::encode(hasher.finalize());
         }
-        
+
         // The cumulative Merkle Root is the hash of all node hashes, sorted by node ID for determinism.
         let mut sorted_hashes: Vec<(&String, &String)> = node_hashes.iter().collect();
         sorted_hashes.sort_by_key(|&(id, _)| id);
-        
+
         let mut root_hasher = Sha256::new();
         for (_, hash) in sorted_hashes {
             root_hasher.update(hash.as_bytes());
         }
-        
+
         hex::encode(root_hasher.finalize())
     }
 
@@ -170,7 +170,9 @@ impl ExecutionDag {
         }
 
         if visited_count != self.nodes.len() {
-            return Err(anyhow!("Dependency graph contains cycles (not a valid DAG)"));
+            return Err(anyhow!(
+                "Dependency graph contains cycles (not a valid DAG)"
+            ));
         }
 
         Ok(levels)
@@ -196,19 +198,22 @@ impl SpeculativeScheduler {
             return Ok(());
         }
         self.warm_boot_started = true;
-        
+
         // Speculatively preload the bun configuration / PATH info
         tokio::spawn(async {
             let _ = crate::bun::discovery::find_bun();
         });
-        
+
         Ok(())
     }
 
     /// Execute the compiled DAG speculative graph, running independent levels in parallel.
-    pub async fn run(&mut self, logs_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>) -> Result<SqliteExecution> {
+    pub async fn run(
+        &mut self,
+        logs_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    ) -> Result<SqliteExecution> {
         self.speculative_warm_boot().await.ok();
-        
+
         let start_time = chrono::Utc::now().to_rfc3339();
         let start_instant = Instant::now();
 
@@ -221,12 +226,19 @@ impl SpeculativeScheduler {
         let mut overall_success = true;
 
         if let Some(ref tx) = logs_tx {
-            let _ = tx.send(format!("🚀 [THUMPER] Launching Speculative DAG Execution Engine (Session: {})", self.dag.lock().unwrap().id));
+            let _ = tx.send(format!(
+                "🚀 [THUMPER] Launching Speculative DAG Execution Engine (Session: {})",
+                self.dag.lock().unwrap().id
+            ));
         }
 
         for (idx, level) in levels.into_iter().enumerate() {
             if let Some(ref tx) = logs_tx {
-                let _ = tx.send(format!("⚡ [LEVEL {}] Scheduling speculative parallel agents: {:?}", idx + 1, level));
+                let _ = tx.send(format!(
+                    "⚡ [LEVEL {}] Scheduling speculative parallel agents: {:?}",
+                    idx + 1,
+                    level
+                ));
             }
 
             let mut tasks = Vec::new();
@@ -247,7 +259,10 @@ impl SpeculativeScheduler {
                     }
 
                     if let Some(ref tx) = logs_tx_clone {
-                        let _ = tx.send(format!("  [→] Starting step: {} ({}) [Risk: {}]", node.name, node.command, node.risk));
+                        let _ = tx.send(format!(
+                            "  [→] Starting step: {} ({}) [Risk: {}]",
+                            node.name, node.command, node.risk
+                        ));
                     }
 
                     // Simulate/execute the node's command path
@@ -264,21 +279,32 @@ impl SpeculativeScheduler {
                     if success {
                         node.status = NodeStatus::Success;
                         if let Some(ref tx) = logs_tx_clone {
-                            let _ = tx.send(format!("  [✓] Step complete: {} in {:.2?}", node.name, node_start.elapsed()));
+                            let _ = tx.send(format!(
+                                "  [✓] Step complete: {} in {:.2?}",
+                                node.name,
+                                node_start.elapsed()
+                            ));
                         }
                     } else {
                         node.status = NodeStatus::Failed;
                         if let Some(ref tx) = logs_tx_clone {
-                            let _ = tx.send(format!("  [!] Step FAILED: {}! Booting self-healing recovery loop...", node.name));
+                            let _ = tx.send(format!(
+                                "  [!] Step FAILED: {}! Booting self-healing recovery loop...",
+                                node.name
+                            ));
                         }
 
                         // Run closed-loop self-healing sandbox recovery (Pillar 3)
-                        let healed = crate::bun::recovery::heal_node(&node.command, logs_tx_clone.clone()).await.unwrap_or(false);
+                        let healed =
+                            crate::bun::recovery::heal_node(&node.command, logs_tx_clone.clone())
+                                .await
+                                .unwrap_or(false);
                         if healed {
                             node.status = NodeStatus::Healed;
                             node.remediation_confidence = 1.0;
                             if let Some(ref tx) = logs_tx_clone {
-                                _ = tx.send(format!("  [✓] Healed step successfully: {}", node.name));
+                                _ = tx
+                                    .send(format!("  [✓] Healed step successfully: {}", node.name));
                             }
                         }
                     }
@@ -319,19 +345,29 @@ impl SpeculativeScheduler {
         let mut node_pubkey = None;
         let mut signature = None;
 
-        if let Ok((pubkey_hex, sig_hex)) = crate::registry::keys::sign_data(merkle_root.as_bytes()) {
+        if let Ok((pubkey_hex, sig_hex)) = crate::registry::keys::sign_data(merkle_root.as_bytes())
+        {
             node_pubkey = Some(pubkey_hex);
             signature = Some(sig_hex);
         }
 
         let mut proof_block = String::new();
         proof_block.push_str("\n🔒 [CRYPTOGRAPHIC PROOF OF EXECUTION]\n");
-        proof_block.push_str(&format!("├─ Merkle Root: sha256_{}\n", &merkle_root[..std::cmp::min(16, merkle_root.len())]));
+        proof_block.push_str(&format!(
+            "├─ Merkle Root: sha256_{}\n",
+            &merkle_root[..std::cmp::min(16, merkle_root.len())]
+        ));
         if let Some(ref pubkey) = node_pubkey {
-            proof_block.push_str(&format!("├─ Node PubKey: ed25519_pub_{}\n", &pubkey[..std::cmp::min(16, pubkey.len())]));
+            proof_block.push_str(&format!(
+                "├─ Node PubKey: ed25519_pub_{}\n",
+                &pubkey[..std::cmp::min(16, pubkey.len())]
+            ));
         }
         if let Some(ref sig) = signature {
-            proof_block.push_str(&format!("├─ Signature:   sig_{}... [VERIFIED]\n", &sig[..std::cmp::min(16, sig.len())]));
+            proof_block.push_str(&format!(
+                "├─ Signature:   sig_{}... [VERIFIED]\n",
+                &sig[..std::cmp::min(16, sig.len())]
+            ));
         }
 
         if let Some(ref tx) = logs_tx {
@@ -341,7 +377,7 @@ impl SpeculativeScheduler {
                 }
             }
         }
-        
+
         all_logs.push_str(&proof_block);
 
         let final_exec = SqliteExecution {
@@ -433,11 +469,11 @@ mod tests {
         let levels = dag.compile().unwrap();
         assert_eq!(levels.len(), 3);
         assert_eq!(levels[0], vec!["A".to_string()]);
-        
+
         let mut second_level = levels[1].clone();
         second_level.sort();
         assert_eq!(second_level, vec!["B".to_string(), "C".to_string()]);
-        
+
         assert_eq!(levels[2], vec!["D".to_string()]);
     }
 
@@ -547,4 +583,3 @@ mod tests {
         assert_ne!(root1, root3);
     }
 }
-
