@@ -32,6 +32,12 @@ async fn main() -> Result<()> {
 
     let cli = cli::definition::Cli::parse();
 
+    if cli.introspect {
+        let doc = cli::introspect::build_document(env!("CARGO_PKG_VERSION"));
+        println!("{}", serde_json::to_string_pretty(&doc)?);
+        return Ok(());
+    }
+
     if cli.debug_ancestry {
         println!("{}", crate::bun::get_ancestry_diagnostics());
         return Ok(());

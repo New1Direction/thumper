@@ -51,6 +51,11 @@ pub struct Cli {
     #[arg(long, global = true, hide = true)]
     pub demo: bool,
 
+    /// Emit the korg:introspect@v1 document (callables + capabilities + exit codes) as JSON and exit.
+    /// Agents use this to discover thump's surface without invoking commands.
+    #[arg(long, global = true)]
+    pub introspect: bool,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
