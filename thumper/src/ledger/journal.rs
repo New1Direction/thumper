@@ -99,6 +99,16 @@ impl HealLedger {
         s
     }
 
+    /// The seq_id of the most recently appended event, or None if none yet.
+    /// Used to chain `triggered_by` to the latest event in a session.
+    pub fn last_seq(&self) -> Option<u64> {
+        if self.next_seq > 1 {
+            Some(self.next_seq - 1)
+        } else {
+            None
+        }
+    }
+
     /// Append a chained event and return its seq_id (0 if disabled).
     /// `args`/`result` must contain only strings/ints/bools/objects (no floats —
     /// v1 canonicalization scope) so the chain stays cross-impl verifiable.

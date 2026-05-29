@@ -33,15 +33,17 @@ async fn heal_session_writes_an_intact_verifiable_chain() {
     let events = read(&path);
     assert_eq!(
         events.len(),
-        2,
-        "expected heal.error + heal.exit, got {events:?}"
+        3,
+        "expected heal.error + heal.repair + heal.exit, got {events:?}"
     );
     assert_eq!(events[0]["tool_name"], "heal.error");
     assert_eq!(events[0]["source_agent"], "thumper");
     assert_eq!(events[0]["prev_hash"].as_str().unwrap(), "0".repeat(64));
-    assert_eq!(events[1]["tool_name"], "heal.exit");
-    assert_eq!(events[1]["result"]["healed"], true);
-    assert_eq!(events[1]["triggered_by"], events[0]["seq_id"]);
+    assert_eq!(events[1]["tool_name"], "heal.repair");
+    assert_eq!(events[1]["triggered_by"], events[0]["seq_id"]); // repair ← error
+    assert_eq!(events[2]["tool_name"], "heal.exit");
+    assert_eq!(events[2]["result"]["healed"], true);
+    assert_eq!(events[2]["triggered_by"], events[1]["seq_id"]); // exit ← last (repair)
 
     // the trail is a sound, tamper-evident chain
     assert!(
@@ -69,13 +71,17 @@ async fn two_heal_sessions_extend_one_continuous_chain() {
     heal_node("cmd two", None).await.unwrap();
 
     let events = read(&path);
-    assert_eq!(events.len(), 4, "two sessions → 4 chained events");
-    // seq_ids continue (1..=4), not reset per session, and the whole file verifies
+    assert_eq!(
+        events.len(),
+        6,
+        "two sessions × 3 events → 6 chained events"
+    );
+    // seq_ids continue (1..=6), not reset per session, and the whole file verifies
     let seqs: Vec<u64> = events
         .iter()
         .map(|e| e["seq_id"].as_u64().unwrap())
         .collect();
-    assert_eq!(seqs, vec![1, 2, 3, 4]);
+    assert_eq!(seqs, vec![1, 2, 3, 4, 5, 6]);
     assert!(
         verify_chain(&events, None).is_empty(),
         "continuous chain must verify"
