@@ -7,6 +7,7 @@ mod bun; // thump (formerly cli_anything_bun) Python harness adapter (NDJSON str
 mod cli;
 mod demo;
 mod generator; // will contain python_bridge + engine later
+mod ledger; // korg-ledger@v1 tamper-evident hash-chain + heal-loop journal
 mod registry;
 #[cfg(feature = "tui")]
 mod tui;

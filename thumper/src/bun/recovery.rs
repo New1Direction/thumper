@@ -1,8 +1,10 @@
 //! Closed-loop self-healing sandbox recovery engine.
 //! Catches command/test failures and executes local repair and validation loops.
 
+use crate::ledger::journal::HealLedger;
 use anyhow::Result;
 use regex::Regex;
+use serde_json::json;
 use std::fs;
 use std::path::Path;
 use std::sync::OnceLock;
@@ -30,7 +32,47 @@ pub async fn heal_node(
 }
 
 /// Dynamic, context-aware self-healing that accepts real compiler error streams and workspace paths.
+///
+/// Records the heal session to the korg-ledger@v1 journal: a `heal.error` event
+/// when the failure is intercepted and a `heal.exit` event with the outcome
+/// (healed/not + duration). The two are hash-chained and causally linked, so a
+/// recovery session is a verifiable, replayable trail any korg-ledger verifier
+/// (korgex `verify`, korg-registry `verify_chain`) can audit after the fact.
+/// Journal path honours THUMPER_JOURNAL_PATH / KORG_JOURNAL_PATH.
 pub async fn heal_node_with_context(
+    command: &str,
+    stderr: Option<&str>,
+    worktree_path: Option<&Path>,
+    logs_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+) -> Result<bool> {
+    let start = Instant::now();
+    let mut ledger = HealLedger::open();
+    let excerpt: String = stderr.unwrap_or("").chars().take(200).collect();
+    let error_seq = ledger.append(
+        "heal.error",
+        json!({ "command": command, "error_excerpt": excerpt }),
+        json!({}),
+        false,
+        0,
+        None,
+    );
+
+    let outcome = heal_node_inner(command, stderr, worktree_path, logs_tx).await;
+    let healed = matches!(outcome, Ok(true));
+    ledger.append(
+        "heal.exit",
+        json!({ "command": command }),
+        json!({ "healed": healed }),
+        healed,
+        start.elapsed().as_millis() as u64,
+        Some(error_seq),
+    );
+    outcome
+}
+
+/// The diagnosis + patch loop. Behavior is unchanged; `heal_node_with_context`
+/// wraps it to record the verifiable ledger trail.
+async fn heal_node_inner(
     command: &str,
     stderr: Option<&str>,
     worktree_path: Option<&Path>,
