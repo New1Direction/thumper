@@ -1,8 +1,10 @@
 //! Closed-loop self-healing sandbox recovery engine.
 //! Catches command/test failures and executes local repair and validation loops.
 
+use crate::ledger::journal::HealLedger;
 use anyhow::Result;
 use regex::Regex;
+use serde_json::json;
 use std::fs;
 use std::path::Path;
 use std::sync::OnceLock;
@@ -30,11 +32,62 @@ pub async fn heal_node(
 }
 
 /// Dynamic, context-aware self-healing that accepts real compiler error streams and workspace paths.
+///
+/// Records the heal session to the korg-ledger@v1 journal: a `heal.error` event
+/// when the failure is intercepted and a `heal.exit` event with the outcome
+/// (healed/not + duration). The two are hash-chained and causally linked, so a
+/// recovery session is a verifiable, replayable trail any korg-ledger verifier
+/// (korgex `verify`, korg-registry `verify_chain`) can audit after the fact.
+/// Journal path honours THUMPER_JOURNAL_PATH / KORG_JOURNAL_PATH.
 pub async fn heal_node_with_context(
     command: &str,
     stderr: Option<&str>,
     worktree_path: Option<&Path>,
     logs_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+) -> Result<bool> {
+    let start = Instant::now();
+    let mut ledger = HealLedger::open();
+    let excerpt: String = stderr.unwrap_or("").chars().take(200).collect();
+    let error_seq = ledger.append(
+        "heal.error",
+        json!({ "command": command, "error_excerpt": excerpt }),
+        json!({}),
+        false,
+        0,
+        None,
+    );
+
+    let outcome = heal_node_inner(
+        command,
+        stderr,
+        worktree_path,
+        logs_tx,
+        &mut ledger,
+        error_seq,
+    )
+    .await;
+    let healed = matches!(outcome, Ok(true));
+    let last = ledger.last_seq().unwrap_or(error_seq);
+    ledger.append(
+        "heal.exit",
+        json!({ "command": command }),
+        json!({ "healed": healed }),
+        healed,
+        start.elapsed().as_millis() as u64,
+        Some(last),
+    );
+    outcome
+}
+
+/// The diagnosis + patch loop. Behavior is unchanged; `heal_node_with_context`
+/// wraps it to record the verifiable ledger trail.
+async fn heal_node_inner(
+    command: &str,
+    stderr: Option<&str>,
+    worktree_path: Option<&Path>,
+    logs_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    ledger: &mut HealLedger,
+    error_seq: u64,
 ) -> Result<bool> {
     let start = Instant::now();
 
@@ -92,6 +145,14 @@ pub async fn heal_node_with_context(
                                 let _ = tx.send(format!("  🔧 [HEAL] [Step 3/4: Verification] Semicolon successfully auto-inserted in {}ms", start.elapsed().as_millis()));
                                 let _ = tx.send("  🔧 [HEAL] [Step 4/4: Redeploy] Hot-swapping corrected file and returning compilation control.".to_string());
                             }
+                            ledger.append(
+                                "heal.repair",
+                                json!({ "error_type": "semicolon", "file": file_rel }),
+                                json!({ "strategy": "insert-semicolon" }),
+                                true,
+                                0,
+                                Some(error_seq),
+                            );
                             return Ok(true);
                         }
                     }
@@ -143,6 +204,14 @@ pub async fn heal_node_with_context(
                                     let _ = tx.send(format!("  🔧 [HEAL] [Step 3/4: Verification] Variable `{}` successfully prefixed with underscore in {}ms", var_name, start.elapsed().as_millis()));
                                     let _ = tx.send("  🔧 [HEAL] [Step 4/4: Redeploy] Hot-swapping corrected file and returning control.".to_string());
                                 }
+                                ledger.append(
+                                    "heal.repair",
+                                    json!({ "error_type": "unused-variable", "file": file_rel }),
+                                    json!({ "strategy": "prefix-underscore" }),
+                                    true,
+                                    0,
+                                    Some(error_seq),
+                                );
                                 return Ok(true);
                             }
                         }
@@ -188,6 +257,14 @@ pub async fn heal_node_with_context(
                                 let _ = tx.send(format!("  🔧 [HEAL] [Step 3/4: Verification] Import line successfully commented out in {}ms", start.elapsed().as_millis()));
                                 let _ = tx.send("  🔧 [HEAL] [Step 4/4: Redeploy] Hot-swapping corrected file and returning control.".to_string());
                             }
+                            ledger.append(
+                                "heal.repair",
+                                json!({ "error_type": "unused-import", "file": file_rel }),
+                                json!({ "strategy": "comment-line" }),
+                                true,
+                                0,
+                                Some(error_seq),
+                            );
                         }
                     }
                 }
@@ -231,6 +308,14 @@ pub async fn heal_node_with_context(
                         let _ = tx.send(format!("  🔧 [HEAL] [Step 3/4: Verification] Package '{}' successfully auto-installed in {}ms", base_pkg, install_start.elapsed().as_millis()));
                         let _ = tx.send("  🔧 [HEAL] [Step 4/4: Redeploy] Hot-swapping completed, retrying execution flow.".to_string());
                     }
+                    ledger.append(
+                        "heal.repair",
+                        json!({ "error_type": "missing-module", "package": base_pkg }),
+                        json!({ "strategy": "bun-add" }),
+                        true,
+                        0,
+                        Some(error_seq),
+                    );
                     return Ok(true);
                 }
             }
@@ -312,6 +397,14 @@ pub async fn heal_node_with_context(
                                 let _ = tx.send(format!("  🔧 [HEAL] [Step 3/4: Verification] Constant successfully converted to let in {}ms", start.elapsed().as_millis()));
                                 let _ = tx.send("  🔧 [HEAL] [Step 4/4: Redeploy] Hot-swapping corrected file and returning compilation control.".to_string());
                             }
+                            ledger.append(
+                                "heal.repair",
+                                json!({ "error_type": "const-reassign", "file": file_rel }),
+                                json!({ "strategy": "const-to-let" }),
+                                true,
+                                0,
+                                Some(error_seq),
+                            );
                             return Ok(true);
                         }
                     }
@@ -377,6 +470,14 @@ pub async fn heal_node_with_context(
                                     let _ = tx.send(format!("  🔧 [HEAL] [Step 3/4: Verification] Parameter `{}` successfully annotated with ': any' in {}ms", param_name, start.elapsed().as_millis()));
                                     let _ = tx.send("  🔧 [HEAL] [Step 4/4: Redeploy] Hot-swapping corrected file and returning control.".to_string());
                                 }
+                                ledger.append(
+                                    "heal.repair",
+                                    json!({ "error_type": "implicit-any", "file": file_rel }),
+                                    json!({ "strategy": "annotate-any" }),
+                                    true,
+                                    0,
+                                    Some(error_seq),
+                                );
                                 return Ok(true);
                             }
                         }
@@ -465,6 +566,7 @@ pub async fn heal_node_with_context(
                                 let _ = tx.send(format!("  🔧 [HEAL] [Step 3/4: Verification] Added TS compiler suppression successfully in {}ms", start.elapsed().as_millis()));
                                 let _ = tx.send("  🔧 [HEAL] [Step 4/4: Redeploy] Hot-swapping corrected file and returning control.".to_string());
                             }
+                            ledger.append("heal.repair", json!({ "error_type": "ts-unused", "file": file_rel, "code": code }), json!({ "strategy": "ts-ignore" }), true, 0, Some(error_seq));
                             return Ok(true);
                         }
                     }
@@ -496,6 +598,14 @@ pub async fn heal_node_with_context(
                             let _ = tx.send(format!("  🔧 [HEAL] [Step 3/4: Verification] Crate '{}' successfully auto-added to Cargo.toml in {}ms", crate_name, install_start.elapsed().as_millis()));
                             let _ = tx.send("  🔧 [HEAL] [Step 4/4: Redeploy] Hot-swapping completed, retrying compilation flow.".to_string());
                         }
+                        ledger.append(
+                            "heal.repair",
+                            json!({ "error_type": "unresolved-crate", "crate": crate_name }),
+                            json!({ "strategy": "cargo-add" }),
+                            true,
+                            0,
+                            Some(error_seq),
+                        );
                         return Ok(true);
                     }
                 }
@@ -538,6 +648,14 @@ pub async fn heal_node_with_context(
         let _ = tx.send(format!("  🔧 [HEAL] [Step 4/4: Redeploy] Committing patch and hot-swapping shim (Elapsed: {:.2?})", start.elapsed()));
     }
 
+    ledger.append(
+        "heal.repair",
+        json!({ "error_type": "fallback", "command": command }),
+        json!({ "strategy": "simulated-fallback" }),
+        true,
+        0,
+        Some(error_seq),
+    );
     Ok(true)
 }
 
