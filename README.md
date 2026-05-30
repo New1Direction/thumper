@@ -21,23 +21,30 @@ The Rust side is the fast path; the Python harness is the semantic fallback. Und
 ### Native binary (Rust)
 
 ```bash
+cargo install thumper-cli        # installs the `thump` binary
+thump --help
+
+# Full-screen TUI:
+thump
+
+# Onboarding demo (best first run):
+thump --demo
+```
+
+<details><summary>…or build from source</summary>
+
+```bash
 git clone https://github.com/New1Direction/thumper.git
 cd thumper/thumper
 cargo build --release
 ./target/release/thump --help
-
-# Full-screen TUI:
-./target/release/thump
-
-# Onboarding demo (best first run):
-./target/release/thump --demo
 ```
+</details>
 
 ### Python harness only
 
 ```bash
-cd thumper/thump
-pip install -e .
+pip install thump
 python -m thump --help
 ```
 
@@ -59,7 +66,7 @@ For deep details on each piece, see [`thumper/README.md`](thumper/README.md) (Ru
 
 - **50 tests passing** across the workspace (22 lib + 22 bin + 6 e2e TMUX-driven integration)
 - Rust + Python paths are both production-quality for local use
-- Currently no public crates.io / PyPI release — install from source
+- Published: **`thumper-cli`** on [crates.io](https://crates.io/crates/thumper-cli) (the `thump` binary) · **`thump`** on [PyPI](https://pypi.org/project/thump/)
 
 ---
 

@@ -1,5 +1,5 @@
 """
-Script command group for cli-anything-bun.
+Script command group for thump.
 
 Implements the high-level "script run" capability on top of the
 Operation + Process foundation.

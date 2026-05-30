@@ -11,6 +11,9 @@
 **/*$py.class
 **/.pytest_cache/
 **/.hypothesis/
+**/build/
+**/*.egg-info/
+**/.eggs/
 
 # IDE / editors
 .idea/

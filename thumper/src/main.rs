@@ -101,10 +101,10 @@ async fn main() -> Result<()> {
                         "hint": "rebuild with --features tui"
                     }))?;
                 } else {
-                    println!("api-anything TUI is not compiled in this build.");
+                    println!("thump TUI is not compiled in this build.");
                     println!("Rebuild with: cargo run --features tui");
                     println!("Headless usage still works:");
-                    println!("  api-anything generate <name> --json --stream");
+                    println!("  thump generate <name> --json --stream");
                 }
             }
         }
@@ -205,7 +205,7 @@ async fn main() -> Result<()> {
         Some(Commands::Completion { shell }) => {
             use clap::CommandFactory;
             let mut cmd = cli::definition::Cli::command();
-            clap_complete::generate(*shell, &mut cmd, "api-anything", &mut std::io::stdout());
+            clap_complete::generate(*shell, &mut cmd, "thump", &mut std::io::stdout());
         }
     }
 

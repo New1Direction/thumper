@@ -1,5 +1,5 @@
 """
-Operation abstraction for cli-anything-bun.
+Operation abstraction for thump.
 
 Provides a clean, deterministic way to execute finite/transactional
 operations (package install, script run, etc.) while automatically

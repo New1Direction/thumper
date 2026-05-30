@@ -5,6 +5,8 @@ Thumper's agent-oriented semantic layer over Bun.
 Native Rust execution is the preferred fast path when launched under `thump`.
 """
 
+__version__ = "0.2.0"
+
 from .events import (
     BunEvent,
     EventLevel,

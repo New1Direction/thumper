@@ -37,7 +37,7 @@ def _generate_session_id() -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="cli-anything-bun",
+        prog="python -m thump",
         description="Agent-native semantic harness for Bun",
     )
 

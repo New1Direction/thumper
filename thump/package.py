@@ -1,5 +1,5 @@
 """
-Package command group for cli-anything-bun.
+Package command group for thump.
 
 Implements the high-level package management commands on top of
 Operation + Process:

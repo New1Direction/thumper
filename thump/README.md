@@ -78,7 +78,7 @@ Consumers: CLI • TUI Jobs • ACP agents • Rust adapter
 
 ## Related Projects
 
-- [thump](https://github.com/redmicro/api-anything) — The Rust TUI/CLI (Thumper) — primary binary with native Bun execution.
+- [thumper](https://github.com/New1Direction/thumper) — The Rust TUI/CLI (Thumper) — primary binary with native Bun execution.
 
 ## Status
 

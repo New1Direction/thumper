@@ -2,7 +2,7 @@
 Bun Harness — Stable Event Envelope + NDJSON Emitter
 
 This module defines the canonical event format used across the entire
-cli-anything-bun system (Python harness, future Rust frontend, ACP, TUI, etc.).
+thump system (Python harness, future Rust frontend, ACP, TUI, etc.).
 
 Design principles:
 - One stable envelope for all events

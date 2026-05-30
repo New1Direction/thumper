@@ -294,8 +294,7 @@ pub fn callables() -> Vec<Callable> {
         Callable {
             command_id: "thump.completion".to_string(),
             name: "completion".to_string(),
-            description: "Generate shell completion scripts (bash, zsh, fish, ...)."
-                .to_string(),
+            description: "Generate shell completion scripts (bash, zsh, fish, ...).".to_string(),
             surfaces: vec!["cli".to_string()],
             input_schema: serde_json::json!({
                 "type": "object",
@@ -370,13 +369,7 @@ mod tests {
 
     #[test]
     fn capabilities_have_recognized_side_effects() {
-        let valid = [
-            "none",
-            "fs_read",
-            "fs_write",
-            "network",
-            "ledger_write",
-        ];
+        let valid = ["none", "fs_read", "fs_write", "network", "ledger_write"];
         for c in callables() {
             assert!(
                 valid.contains(&c.capabilities.side_effects.as_str()),

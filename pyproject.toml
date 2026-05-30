@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "thump"
+version = "0.2.0"
+description = "Thumper's semantic harness — a structured, event-emitting layer over the Bun runtime (NDJSON events, native-runner promotion)"
+readme = "thump/README.md"
+license = { text = "MIT OR Apache-2.0" }
+requires-python = ">=3.9"
+authors = [
+    { name = "Thumper Contributors" },
+]
+keywords = ["bun", "harness", "events", "ndjson", "thumper", "agent"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Build Tools",
+]
+# Pure standard library — no third-party runtime dependencies.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0,<9.0.0",
+    "build>=1.0.0,<2.0.0",
+    "twine>=5.0.0,<7.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/New1Direction/thumper"
+Repository = "https://github.com/New1Direction/thumper"
+Issues = "https://github.com/New1Direction/thumper/issues"
+
+# The harness is invoked as `python -m thump` (see thump/__main__.py).
+# No console script is declared: the name `thump` belongs to the Rust binary
+# (crate `thumper-cli`), and two installers must not both claim it on PATH.
+
+[tool.setuptools]
+packages = ["thump"]
+license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
