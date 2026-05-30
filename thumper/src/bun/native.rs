@@ -293,6 +293,11 @@ pub async fn spawn_bun_native(inv: BunInvocation) -> Result<BunStream> {
     // Capture verb for richer events + final outcome
     let verb_for_task = verb;
     let operation = verb_to_operation(verb);
+    // Snapshot the command shape so the waiter can ledger the run once it ends.
+    // (cli_args is the exact argv handed to bun; verb is the short stable label.)
+    let ledger_args = cli_args.clone();
+    let ledger_verb = verb.to_string();
+    let started = std::time::Instant::now();
 
     // Spawn parallel line pumps with rich parser
     let parser = Arc::new(BunOutputParser::new());
@@ -341,6 +346,22 @@ pub async fn spawn_bun_native(inv: BunInvocation) -> Result<BunStream> {
             Ok(s) => (s.success(), s.code()),
             Err(_) => (false, None),
         };
+
+        // ONE shared ledger (ecosystem #3): the NORMAL execution path now emits a
+        // chained korg-ledger@v1 `run.exec` event, not only the heal loop. This
+        // makes every bun run thumper performs part of the single auditable
+        // journal heal already writes to (HealLedger honours THUMPER_JOURNAL_PATH
+        // / KORG_JOURNAL_PATH, recovers the chain head, and continues seq_ids).
+        // The append is cheap and off the streaming hot path (we're already in the
+        // dedicated waiter task, post-exit), so it never delays the TUI/outcome.
+        record_run_event(
+            &ledger_verb,
+            &operation,
+            &ledger_args,
+            ok,
+            exit_code,
+            started.elapsed().as_millis() as u64,
+        );
 
         let outcome = BunOutcome {
             ok,
@@ -603,6 +624,42 @@ async fn pump_lines(
 
         let _ = tx.send(BunEventOrOutcome::Event(event));
     }
+}
+
+/// Append one chained `run.exec` event to the shared korg-ledger@v1 journal for
+/// a completed native bun run. Best-effort: a missing/unwritable journal is a
+/// silent no-op (same posture as the heal path) so it never breaks execution.
+///
+/// Event shape conforms to the SHARED-EVENT-SHAPE contract
+/// (spec/korg-ledger-v1/EVENTS.md): `tool_name="run.exec"`, `source_agent="thumper"`,
+/// `args={operation, argv}`, `result={exit_code}`. Values are only
+/// strings/ints/bools so the chain stays cross-impl byte-verifiable (v1 scope).
+fn record_run_event(
+    verb: &str,
+    operation: &str,
+    argv: &[String],
+    ok: bool,
+    exit_code: Option<i32>,
+    duration_ms: u64,
+) {
+    use crate::ledger::journal::HealLedger;
+    use serde_json::json;
+
+    let mut ledger = HealLedger::open();
+    // exit_code may be None if the process was signalled; record null in that case.
+    let exit_val = match exit_code {
+        Some(c) => json!(c),
+        None => json!(null),
+    };
+    ledger.append(
+        "run.exec",
+        json!({ "operation": operation, "verb": verb, "argv": argv }),
+        json!({ "exit_code": exit_val }),
+        ok,
+        duration_ms,
+        // A normal run is a root cause in the journal (no triggering event).
+        None,
+    );
 }
 
 /// Map our short verb to the operation names used by the Python harness
