@@ -3,13 +3,13 @@ name = "thumper-cli"
 version = "0.2.0"
 edition = "2021"
 authors = ["Thumper Contributors"]
-description = "Thumper — The delightful native Bun TUI & CLI with rich telemetry"
+description = "Thumper — the high-performance local execution & recovery substrate for the Korgex agent runtime (native Bun runner, self-healing, ratatui TUI)"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/New1Direction/thumper"
 homepage = "https://github.com/New1Direction/thumper"
 readme = "README.md"
-keywords = ["bun", "tui", "cli", "telemetry", "plasma"]
-categories = ["command-line-utilities", "development-tools"]
+keywords = ["korgex", "agent", "execution", "sandbox", "tui"]
+categories = ["development-tools"]
 
 [features]
 default = ["cli", "tui"]
